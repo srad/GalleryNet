@@ -8,8 +8,7 @@ services:
       - DATABASE_PATH=/app/data/gallery.db
       - UPLOAD_DIR=/app/data/uploads
       - THUMBNAIL_DIR=/app/data/thumbnails
-      #- GALLERY_PASSWORD=${GALLERY_PASSWORD:-}
-      - GALLERY_PASSWORD=test
+      - GALLERY_PASSWORD=${GALLERY_PASSWORD?Password missing}
     volumes:
       - ./data:/app/data
     restart: unless-stopped

@@ -1,0 +1,15 @@
+services:
+  server:
+    build: .
+    container_name: gallerynet
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_PATH=/app/data/gallery.db
+      - UPLOAD_DIR=/app/data/uploads
+      - THUMBNAIL_DIR=/app/data/thumbnails
+      #- GALLERY_PASSWORD=${GALLERY_PASSWORD:-}
+      - GALLERY_PASSWORD=test
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

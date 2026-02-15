@@ -1,0 +1,17 @@
+target
+**/*.rs.bk
+.idea
+.vscode
+.git
+.gitignore
+Dockerfile
+gallery.db
+gallery.db-*
+data
+frontend/node_modules
+frontend/dist
+scripts
+**/*.md
+nul
+NUL
+docker-compose.yml

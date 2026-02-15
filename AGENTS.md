@@ -18,7 +18,12 @@ src/
 │   ├── delete.rs    # DeleteMediaUseCase — single and batch delete (DB + files)
 │   └── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison
 ├── infrastructure/  # Trait implementations (adapters)
-│   ├── sqlite_repo.rs     # SQLite + sqlite-vec for metadata and vector storage (connection pool)
+│   ├── sqlite_repo/       # SQLite + sqlite-vec (connection pool, split into submodules)
+│   │   ├── mod.rs         # Pool struct, schema init, trait impl delegation, tag helpers
+│   │   ├── media.rs       # CRUD: save, find, delete, list, counts, favorites
+│   │   ├── folders.rs     # Folder operations: create, list, delete, rename, reorder, media membership
+│   │   ├── tags.rs        # Tag operations: get_all, update single, update batch
+│   │   └── embeddings.rs  # Vector embedding retrieval for similarity grouping
 │   ├── ort_processor.rs   # MobileNetV3 ONNX inference via ort crate (session pool)
 │   └── phash_generator.rs # Perceptual hashing for duplicate detection
 ├── presentation/    # HTTP layer
@@ -31,7 +36,9 @@ frontend/src/
 ├── auth.ts              # Auth utilities: apiFetch (401-intercepting fetch wrapper), fireUnauthorized event dispatcher
 ├── types.ts             # Shared types: MediaItem, MediaFilter, UploadProgress, Folder
 └── components/
-    ├── Icons.tsx        # Inline SVG icons (PhotoIcon, UploadIcon, SearchIcon)
+    ├── Icons.tsx        # Inline SVG icons (PhotoIcon, UploadIcon, SearchIcon, TagIcon)
+    ├── TagFilter.tsx    # Tag filter dropdown with search, multi-select checkboxes, badge count
+    ├── TagInput.tsx     # Tag editor with autocomplete suggestions, create-new-tag, keyboard nav
     ├── LoginView.tsx    # Password login form — shown when unauthenticated
     ├── MediaCard.tsx    # Thumbnail card with lazy loading, video play badge, hover overlay, selection checkbox
     ├── MediaModal.tsx   # Full-size media viewer with detail panel, EXIF data, keyboard navigation
@@ -127,6 +134,20 @@ CREATE TABLE favorites (
     media_id BLOB PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL
 );
+
+-- Tags
+CREATE TABLE tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
+
+-- Tag-media junction (many-to-many)
+CREATE TABLE media_tags (
+    media_id BLOB NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (media_id, tag_id)
+);
+CREATE INDEX idx_media_tags_tag_id ON media_tags(tag_id);
 ```
 
 Auto-migration: on startup, if the `media_type` column is missing (pre-existing DB), the app runs `ALTER TABLE` to add it and backfills existing rows by checking file extension.
@@ -168,7 +189,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `POST /api/upload` — Multipart file upload (single or multiple files). Single file returns `MediaItem` JSON. Multiple files returns array of `{media, error, filename}` results. Streams to temp file to avoid memory buffering. HTTP 409 for duplicates.
 - `POST /api/search` — Multipart with `file` (image) and `similarity` (0-100). Returns array of `MediaItem`.
 - `POST /api/media/group` — Group media by similarity. JSON body `{"folder_id": "...", "similarity": 80}`. Returns array of `MediaGroup` (groups of items).
-- `GET /api/media?page=1&limit=20&media_type=image&sort=desc` — Paginated media list. Optional `media_type` filter (`image` or `video`). Optional `sort` param (`asc` or `desc`, default `desc`). Optional `favorite=true`. Sorted by `original_date`. Returns array of `MediaSummary`.
+- `GET /api/media?page=1&limit=20&media_type=image&sort=desc&tags=a,b` — Paginated media list. Optional `media_type` filter (`image` or `video`). Optional `sort` param (`asc` or `desc`, default `desc`). Optional `favorite=true`. Optional `tags` (comma-separated, AND filter). Sorted by `original_date`. Returns array of `MediaSummary`.
 - `GET /api/media/{id}` — Get full `MediaItem` by UUID, including `exif_json`. Returns 404 if not found.
 - `POST /api/media/{id}/favorite` — Toggle favorite status. JSON body `{"favorite": true/false}`. Returns 200.
 - `GET /api/stats` — Server statistics: `{version, total_files, total_images, total_videos, total_size_bytes, disk_free_bytes, disk_total_bytes}`.

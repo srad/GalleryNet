@@ -179,6 +179,7 @@ impl UploadMediaUseCase {
             size_bytes,
             exif_json,
             is_favorite: false,
+            tags: vec![],
         };
 
         self.repo.save_metadata_and_vector(&media, features.as_deref())?;

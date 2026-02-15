@@ -17,6 +17,8 @@ pub struct MediaItem {
     pub exif_json: Option<String>,
     #[serde(default)]
     pub is_favorite: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +31,8 @@ pub struct MediaSummary {
     pub original_date: DateTime<Utc>,
     #[serde(default)]
     pub is_favorite: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import type { MediaItem, MediaFilter, Folder, MediaGroup } from '../types';
-import { PhotoIcon, UploadIcon, PlusIcon, HeartIcon } from './Icons';
+import { PhotoIcon, UploadIcon, PlusIcon, HeartIcon, TagIcon } from './Icons';
 import MediaCard from './MediaCard';
 import MediaModal from './MediaModal';
+import TagFilter from './TagFilter';
+import TagInput from './TagInput';
 import { apiFetch, fireUnauthorized } from '../auth';
 
 interface LibraryPickerProps {
@@ -92,7 +94,10 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         return saved === 'asc' ? 'asc' : 'desc';
     });
     const [viewFavorites, setViewFavorites] = useState(favoritesOnly || false);
+    const [filterTags, setFilterTags] = useState<string[]>([]);
     const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
+    const [showBatchTagModal, setShowBatchTagModal] = useState(false);
+    const [batchTags, setBatchTags] = useState<string[]>([]);
 
     // --- Grouping state ---
     const [isGrouped, setIsGrouped] = useState(false);
@@ -305,11 +310,17 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         if (viewFavorites) {
             params.set('favorite', 'true');
         }
+        if (filterTags.length > 0) {
+            // Repeat tags key: tags=a&tags=b
+            // But URLSearchParams.set overwrites. append appends.
+            // But we can also use comma separated as backend supports it now.
+            params.set('tags', filterTags.join(','));
+        }
         if (folderId) {
             return `/api/folders/${folderId}/media?${params}`;
         }
         return `/api/media?${params}`;
-    }, [folderId, viewFavorites]);
+    }, [folderId, viewFavorites, filterTags]);
 
     // --- Fetch a single page ---
     const fetchPage = useCallback(async (pageNum: number, currentFilter: MediaFilter, currentSort: SortOrder, append: boolean) => {
@@ -398,7 +409,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         setInitialLoad(true);
         exitSelectionMode();
         fetchPage(1, filter, sortOrder, false);
-    }, [filter, sortOrder, fetchPage, exitSelectionMode, isGrouped, viewFavorites]);
+    }, [filter, sortOrder, fetchPage, exitSelectionMode, isGrouped, viewFavorites, filterTags]);
 
     // --- Picker mode auto-select ---
     useEffect(() => {
@@ -427,6 +438,32 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             setMedia(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: !newStatus } : m));
         }
     }, []);
+
+    const handleBatchTag = useCallback(async () => {
+        if (!batchTags.length && !confirm("This will remove all tags from selected items. Continue?")) return;
+        
+        const ids = media
+            .filter(m => selected.has(m.filename) && m.id)
+            .map(m => m.id!);
+            
+        if (ids.length === 0) return;
+
+        try {
+            await apiFetch('/api/media/batch-tags', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids, tags: batchTags }),
+            });
+            setShowBatchTagModal(false);
+            setBatchTags([]);
+            exitSelectionMode();
+            // Refresh to show new tags (though tags aren't visible on grid yet, but filters use them)
+            fetchPage(1, filter, sortOrder, false); 
+        } catch (e) {
+            console.error('Batch tag error', e);
+            alert('Failed to update tags');
+        }
+    }, [batchTags, media, selected, exitSelectionMode, fetchPage, filter, sortOrder]);
 
     // --- Handle items picked from library (when acting as picker parent) ---
     const handlePickItems = useCallback(async (ids: string[]) => {
@@ -1002,7 +1039,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
                     </button>
 
-                    {/* Group toggle */}
+                    <TagFilter selectedTags={filterTags} onChange={setFilterTags} />
                     <button
                         onClick={() => setIsGrouped(g => !g)}
                         disabled={isGroupComputing}
@@ -1325,6 +1362,15 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     ) : (
                         /* Normal actions */
                         <>
+                            {/* Batch Tags */}
+                            <button
+                                onClick={() => setShowBatchTagModal(true)}
+                                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 hover:bg-indigo-700 transition-colors"
+                            >
+                                <TagIcon />
+                                <span className="hidden sm:inline">Tags</span>
+                            </button>
+
                             {/* Add to folder */}
                     <div className="relative" data-folder-picker>
                         <button
@@ -1486,6 +1532,46 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     />
                 );
             })()}
+
+            {/* Batch Tag Modal */}
+            {showBatchTagModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                            <h3 className="font-semibold text-gray-900">Tag {selected.size} items</h3>
+                            <button onClick={() => setShowBatchTagModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="p-4">
+                            <p className="text-xs text-gray-500 mb-3">
+                                Enter tags to apply to all selected items. This will <strong>overwrite</strong> existing tags for these items.
+                            </p>
+                            <TagInput
+                                value={batchTags}
+                                onChange={setBatchTags}
+                                placeholder="Enter tags..."
+                            />
+                        </div>
+                        <div className="px-4 py-3 bg-gray-50 flex justify-end gap-2">
+                            <button
+                                onClick={() => setShowBatchTagModal(false)}
+                                className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleBatchTag}
+                                className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                            >
+                                Apply Tags
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Library Picker */}
             {showPicker && folderId && (

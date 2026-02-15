@@ -42,11 +42,20 @@ pub trait MediaRepository: Send + Sync {
         offset: usize,
         media_type: Option<&str>,
         favorite: bool,
+        tags: Option<Vec<String>>,
         sort_asc: bool,
     ) -> Result<Vec<MediaSummary>, DomainError>;
     fn media_counts(&self) -> Result<MediaCounts, DomainError>;
 
     fn set_favorite(&self, id: uuid::Uuid, favorite: bool) -> Result<(), DomainError>;
+
+    fn get_all_tags(&self) -> Result<Vec<String>, DomainError>;
+    fn update_media_tags(&self, id: uuid::Uuid, tags: Vec<String>) -> Result<(), DomainError>;
+    fn update_media_tags_batch(
+        &self,
+        ids: &[uuid::Uuid],
+        tags: &[String],
+    ) -> Result<(), DomainError>;
 
     // --- Folder operations ---
     fn create_folder(&self, id: uuid::Uuid, name: &str) -> Result<Folder, DomainError>;
@@ -73,6 +82,7 @@ pub trait MediaRepository: Send + Sync {
         offset: usize,
         media_type: Option<&str>,
         favorite: bool,
+        tags: Option<Vec<String>>,
         sort_asc: bool,
     ) -> Result<Vec<MediaSummary>, DomainError>;
     fn get_folder_media_files(

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MediaItem } from '../types';
 import { apiFetch } from '../auth';
-import { HeartIcon } from './Icons';
+import { HeartIcon, TagIcon } from './Icons';
+import TagInput from './TagInput';
 
 interface MediaModalProps {
     item: MediaItem;
@@ -119,6 +120,22 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
         }
     }, [onPrev, onNext]);
 
+    const handleTagsChange = useCallback(async (newTags: string[]) => {
+        if (!displayItem.id) return;
+        // Optimistic update locally
+        setDetail(prev => prev ? { ...prev, tags: newTags } : { ...item, tags: newTags });
+        
+        try {
+            await apiFetch(`/api/media/${displayItem.id}/tags`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tags: newTags }),
+            });
+        } catch (e) {
+            console.error('Failed to update tags', e);
+        }
+    }, [displayItem.id, item]);
+
     return (
         <div
             ref={backdropRef}
@@ -188,6 +205,17 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                     <h3 className="text-sm font-semibold text-white/90 mb-4 break-words" title={displayItem.original_filename || displayItem.filename}>
                         {displayItem.original_filename || displayItem.filename}
                     </h3>
+
+                    <div className="mb-4">
+                        <div className="flex items-center gap-2 mb-1.5 text-xs font-semibold text-white/50 uppercase tracking-wider">
+                            <TagIcon /> Tags
+                        </div>
+                        <TagInput
+                            value={displayItem.tags || []}
+                            onChange={handleTagsChange}
+                            placeholder="Add tags..."
+                        />
+                    </div>
 
                     <dl className="space-y-3 text-sm">
                         <div>

@@ -38,8 +38,31 @@ pub struct Pagination {
     pub limit: Option<usize>,
     pub media_type: Option<String>,
     pub favorite: Option<bool>,
+    pub tags: Option<String>, // Comma-separated
     /// Sort direction for original_date: "asc" or "desc" (default "desc")
     pub sort: Option<String>,
+}
+
+async fn list_handler(
+    State(state): State<AppState>,
+    Query(pagination): Query<Pagination>,
+) -> Result<impl IntoResponse, DomainError> {
+    let page = pagination.page.unwrap_or(1);
+    let limit = pagination.limit.unwrap_or(20);
+    
+    // Ensure valid page
+    let page = if page < 1 { 1 } else { page };
+    
+    let sort_asc = pagination.sort.as_deref() == Some("asc");
+    let favorite = pagination.favorite.unwrap_or(false);
+    
+    let tags = pagination.tags.as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
+
+    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, tags, sort_asc).await?;
+    
+    Ok(Json(results))
 }
 
 // Error handling
@@ -88,7 +111,10 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media/group", post(group_media_handler))
         .route("/media/{id}", get(get_media_handler).delete(delete_handler))
         .route("/media/{id}/favorite", post(toggle_favorite_handler))
+        .route("/media/{id}/tags", put(update_tags_handler))
+        .route("/media/batch-tags", put(batch_update_tags_handler))
         .route("/media/{id}/similar", get(search_by_id_handler))
+        .route("/tags", get(list_tags_handler))
         .route("/stats", get(stats_handler))
         .route("/folders", get(list_folders_handler).post(create_folder_handler))
         .route("/folders/reorder", put(reorder_folders_handler))
@@ -190,23 +216,6 @@ async fn auth_check_handler(
             (StatusCode::OK, Json(json!({ "authenticated": true, "required": false }))).into_response()
         }
     }
-}
-
-async fn list_handler(
-    State(state): State<AppState>,
-    Query(pagination): Query<Pagination>,
-) -> Result<impl IntoResponse, DomainError> {
-    let page = pagination.page.unwrap_or(1);
-    let limit = pagination.limit.unwrap_or(20);
-    
-    // Ensure valid page
-    let page = if page < 1 { 1 } else { page };
-    
-    let sort_asc = pagination.sort.as_deref() == Some("asc");
-    let favorite = pagination.favorite.unwrap_or(false);
-    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, sort_asc).await?;
-    
-    Ok(Json(results))
 }
 
 async fn stats_handler(
@@ -475,6 +484,41 @@ async fn toggle_favorite_handler(
     Ok(StatusCode::OK)
 }
 
+async fn list_tags_handler(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, DomainError> {
+    let tags = state.repo.get_all_tags()?;
+    Ok(Json(tags))
+}
+
+#[derive(Deserialize)]
+struct UpdateTagsRequest {
+    tags: Vec<String>,
+}
+
+async fn update_tags_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateTagsRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.repo.update_media_tags(id, body.tags)?;
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct BatchUpdateTagsRequest {
+    ids: Vec<Uuid>,
+    tags: Vec<String>,
+}
+
+async fn batch_update_tags_handler(
+    State(state): State<AppState>,
+    Json(body): Json<BatchUpdateTagsRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.repo.update_media_tags_batch(&body.ids, &body.tags)?;
+    Ok(StatusCode::OK)
+}
+
 async fn batch_delete_handler(
     State(state): State<AppState>,
     Json(ids): Json<Vec<Uuid>>,
@@ -676,6 +720,7 @@ struct FolderPagination {
     media_type: Option<String>,
     sort: Option<String>,
     favorite: Option<bool>,
+    tags: Option<String>,
 }
 
 async fn list_folder_media_handler(
@@ -688,8 +733,12 @@ async fn list_folder_media_handler(
     let offset = (page - 1) * limit;
     let sort_asc = pagination.sort.as_deref() == Some("asc");
     let favorite = pagination.favorite.unwrap_or(false);
+    
+    let tags = pagination.tags.as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
 
-    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), favorite, sort_asc)?;
+    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), favorite, tags, sort_asc)?;
     Ok(Json(results))
 }
 

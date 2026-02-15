@@ -27,7 +27,7 @@ src/
 └── main.rs          # Wiring, config, server startup
 
 frontend/src/
-├── App.tsx              # Root component — tab routing, filter state, refresh key, upload progress, beforeunload guard, auth gate, folder navigation
+├── App.tsx              # Root component — tab routing, filter state, refresh key, upload progress, beforeunload guard, auth gate, folder navigation, mobile sidebar toggle + header bar
 ├── auth.ts              # Auth utilities: apiFetch (401-intercepting fetch wrapper), fireUnauthorized event dispatcher
 ├── types.ts             # Shared types: MediaItem, MediaFilter, UploadProgress, Folder
 └── components/
@@ -180,6 +180,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 
 ## Frontend Architecture
 
+- **Responsive layout**: Fully responsive across smartphones, tablets, and desktops. Sidebar is an off-canvas drawer on mobile (`<md`) triggered by a hamburger menu in a fixed top header bar; on desktop (`md:`) it's a static sidebar. Toolbar controls wrap on small screens with icon-only buttons at `<sm` and text labels at `sm:`. Grid columns scale from 2 (mobile) to 8 (xl). `MediaModal` uses reduced padding on mobile with touch swipe navigation. Selection toolbar is full-width on mobile, centered pill on desktop. All padding values are tiered (`p-4`/`p-8`) using Tailwind responsive prefixes.
 - **Auth gate**: `App` checks `/api/auth-check` on mount. If auth is required and user is not authenticated, shows `LoginView` instead of the main app. All API calls use `apiFetch()` from `auth.ts` which fires a `gallerynet-unauthorized` custom window event on 401 responses, causing `App` to switch back to the login screen. Upload XHRs check for 401 explicitly and call `fireUnauthorized()`.
 - **Infinite scroll**: `GalleryView` uses `IntersectionObserver` with `root: null` (viewport) and 400px `rootMargin` to pre-fetch the next page. Pages are 60 items. Race condition protection via fetch ID counter and refs for mutable pagination state.
 - **Lazy loading**: Thumbnail `<img>` tags use `loading="lazy"` and `decoding="async"`.
@@ -194,7 +195,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - **Stats sidebar**: Fetches `/api/stats` on load and after each upload. Shows file counts, storage used, disk free space with color-coded bar, and app version.
 - **Video indicators**: Cards detect video by file extension and show a translucent play button overlay.
 - **Refresh key pattern**: `App` holds a `refreshKey` counter incremented after uploads. Both `GalleryView` and `Sidebar` re-fetch when it changes.
-- **Media detail modal**: `MediaModal` shows full-size image/video with a detail panel. Fetches full `MediaItem` via `GET /api/media/{id}` to display EXIF data (collapsible table). Keyboard navigation (Arrow Left/Right, Escape), prev/next buttons, backdrop click to close. Selected item tracked by `filename` (stable across grid mutations).
+- **Media detail modal**: `MediaModal` shows full-size image/video with a detail panel. Fetches full `MediaItem` via `GET /api/media/{id}` to display EXIF data (collapsible table). Keyboard navigation (Arrow Left/Right, Escape), prev/next buttons, backdrop click to close, touch swipe left/right for mobile navigation. Selected item tracked by `filename` (stable across grid mutations).
 - **Multi-select & batch operations**: `GalleryView` has a "Select" toggle button that enters selection mode. In selection mode, clicking a card toggles its selection (blue checkbox overlay on `MediaCard`). Shift-click selects a range. Floating toolbar appears at the bottom with: count display, select all/deselect all, download (single file or zip with streamed progress overlay), delete (with confirmation dialog), and cancel. Escape key exits selection mode. Selection mode auto-closes after successful download or delete. Selection state is cleared on filter/sort changes.
 - **Marquee (rubber-band) selection**: Click and drag on the grid background to draw a selection rectangle (like Windows Explorer). Cards intersecting the rectangle are live-selected as you drag. Automatically enters selection mode when a drag starts. Hold Ctrl/Cmd while dragging to add to existing selection. Uses absolute page coordinates with scroll offset for accurate hit-testing. 5px deadzone prevents accidental marquee on normal clicks. Each `MediaCard` has a `data-filename` attribute for DOM-based intersection detection.
 - **Download progress**: Batch download streams the response via `ReadableStream` and shows a modal overlay with spinner, progress bar (when `Content-Length` is available), and received/total byte counts. Zip filename format: `gallerynet_<count>_<YYYYMMDD_HHMMSS>.zip`.

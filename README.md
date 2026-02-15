@@ -57,10 +57,11 @@
 ## Features
 
 ### Gallery
+- Fully responsive layout &mdash; works on smartphones, tablets, and desktops
 - Infinite-scroll grid with lazy-loaded thumbnails
 - Filter by media type (All / Photos / Videos)
 - Sort by date (Newest / Oldest) based on EXIF original date
-- Full-size media viewer with EXIF detail panel and keyboard navigation
+- Full-size media viewer with EXIF detail panel, keyboard navigation, and touch swipe
 
 ### AI-Powered Visual Search
 - Upload a reference image and find visually similar photos in your library

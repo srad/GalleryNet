@@ -15,6 +15,8 @@ pub struct MediaItem {
     pub height: Option<u32>,
     pub size_bytes: i64,
     pub exif_json: Option<String>,
+    #[serde(default)]
+    pub is_favorite: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +27,8 @@ pub struct MediaSummary {
     pub media_type: String,
     pub uploaded_at: DateTime<Utc>,
     pub original_date: DateTime<Utc>,
+    #[serde(default)]
+    pub is_favorite: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

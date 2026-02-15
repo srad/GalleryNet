@@ -121,6 +121,12 @@ CREATE TABLE folder_media (
     media_id BLOB NOT NULL REFERENCES media(id) ON DELETE CASCADE,
     PRIMARY KEY (folder_id, media_id)
 );
+
+-- Favorites
+CREATE TABLE favorites (
+    media_id BLOB PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL
+);
 ```
 
 Auto-migration: on startup, if the `media_type` column is missing (pre-existing DB), the app runs `ALTER TABLE` to add it and backfills existing rows by checking file extension.
@@ -162,8 +168,9 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `POST /api/upload` — Multipart file upload (single or multiple files). Single file returns `MediaItem` JSON. Multiple files returns array of `{media, error, filename}` results. Streams to temp file to avoid memory buffering. HTTP 409 for duplicates.
 - `POST /api/search` — Multipart with `file` (image) and `similarity` (0-100). Returns array of `MediaItem`.
 - `POST /api/media/group` — Group media by similarity. JSON body `{"folder_id": "...", "similarity": 80}`. Returns array of `MediaGroup` (groups of items).
-- `GET /api/media?page=1&limit=20&media_type=image&sort=desc` — Paginated media list. Optional `media_type` filter (`image` or `video`). Optional `sort` param (`asc` or `desc`, default `desc`). Sorted by `original_date`. Returns array of `MediaSummary`.
+- `GET /api/media?page=1&limit=20&media_type=image&sort=desc` — Paginated media list. Optional `media_type` filter (`image` or `video`). Optional `sort` param (`asc` or `desc`, default `desc`). Optional `favorite=true`. Sorted by `original_date`. Returns array of `MediaSummary`.
 - `GET /api/media/{id}` — Get full `MediaItem` by UUID, including `exif_json`. Returns 404 if not found.
+- `POST /api/media/{id}/favorite` — Toggle favorite status. JSON body `{"favorite": true/false}`. Returns 200.
 - `GET /api/stats` — Server statistics: `{version, total_files, total_images, total_videos, total_size_bytes, disk_free_bytes, disk_total_bytes}`.
 - `DELETE /api/media/{id}` — Delete single media item. Returns 204 or 404.
 - `POST /api/media/batch-delete` — JSON body `["uuid1", "uuid2", ...]`. Returns `{"deleted": N}`. Deletes DB rows, embeddings, originals, and thumbnails.
@@ -194,6 +201,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - **Beforeunload guard**: `GalleryView` registers `beforeunload` listener during group computation to prevent accidental page closure.
 - **Stats sidebar**: Fetches `/api/stats` on load and after each upload. Shows file counts, storage used, disk free space with color-coded bar, and app version.
 - **Video indicators**: Cards detect video by file extension and show a translucent play button overlay.
+- **Favorites**: Dedicated sidebar tab showing only favorite items. Toggle button on media cards (heart icon) and in the detail modal.
 - **Refresh key pattern**: `App` holds a `refreshKey` counter incremented after uploads. Both `GalleryView` and `Sidebar` re-fetch when it changes.
 - **Media detail modal**: `MediaModal` shows full-size image/video with a detail panel. Fetches full `MediaItem` via `GET /api/media/{id}` to display EXIF data (collapsible table). Keyboard navigation (Arrow Left/Right, Escape), prev/next buttons, backdrop click to close, touch swipe left/right for mobile navigation. Selected item tracked by `filename` (stable across grid mutations).
 - **Multi-select & batch operations**: `GalleryView` has a "Select" toggle button that enters selection mode. In selection mode, clicking a card toggles its selection (blue checkbox overlay on `MediaCard`). Shift-click selects a range. Floating toolbar appears at the bottom with: count display, select all/deselect all, download (single file or zip with streamed progress overlay), delete (with confirmation dialog), and cancel. Escape key exits selection mode. Selection mode auto-closes after successful download or delete. Selection state is cleared on filter/sort changes.

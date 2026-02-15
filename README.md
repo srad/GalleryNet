@@ -47,6 +47,7 @@
 - **AI Visual Search** &mdash; Find similar images and videos using MobileNetV3 embeddings and cosine similarity via [sqlite-vec](https://github.com/asg017/sqlite-vec)
 - **Duplicate Detection** &mdash; Perceptual hashing automatically prevents uploading the same image or video twice
 - **Item Grouping** &mdash; Grouping of similar images and videos with gradual similarity slider
+- **Favorites** &mdash; Mark items as favorites to quickly access your best shots in a dedicated view
 - **Video Support** &mdash; Full video upload with intelligent frame extraction via ffmpeg for thumbnails, hashing, and feature vectors
 - **Virtual Folders** &mdash; Organize media into folders without moving files. Many-to-many: one photo can live in multiple folders
 - **Batch Operations** &mdash; Multi-select with marquee (rubber-band) selection, batch download as zip, batch delete, batch add-to-folder
@@ -62,6 +63,11 @@
 - Filter by media type (All / Photos / Videos)
 - Sort by date (Newest / Oldest) based on EXIF original date
 - Full-size media viewer with EXIF detail panel, keyboard navigation, and touch swipe
+
+### Favorites
+- Mark any photo or video as a favorite with a single click
+- Dedicated "Favorites" tab in the sidebar
+- Filter by favorites within virtual folders to see best-of collections
 
 ### AI-Powered Visual Search
 - Upload a reference image and find visually similar photos in your library
@@ -227,6 +233,7 @@ src/
 | `POST` | `/api/search` | Visual similarity search. Multipart with `file` + `similarity` |
 | `GET` | `/api/media` | Paginated media list. Params: `page`, `limit`, `media_type`, `sort` |
 | `GET` | `/api/media/{id}` | Get single media item with EXIF data |
+| `POST` | `/api/media/{id}/favorite` | Toggle favorite status. Body: `{"favorite": true/false}` |
 | `DELETE` | `/api/media/{id}` | Delete single media item |
 | `POST` | `/api/media/batch-delete` | Batch delete. Body: `["uuid1", ...]` |
 | `POST` | `/api/media/download` | Batch download as zip. Body: `["uuid1", ...]` |

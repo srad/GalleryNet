@@ -72,6 +72,16 @@ impl SqliteRepository {
         )
         .map_err(|e| DomainError::Database(e.to_string()))?;
 
+        // Favorites
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS favorites (
+                media_id BLOB PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| DomainError::Database(e.to_string()))?;
+
         let mut connections = vec![conn];
         for _ in 1..POOL_SIZE {
             connections.push(Self::open_conn(path)?);
@@ -216,7 +226,7 @@ impl MediaRepository for SqliteRepository {
             };
 
             let mut stmt = conn.prepare(
-                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, v.distance
+                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, v.distance, (f.media_id IS NOT NULL) as is_favorite
                  FROM (
                     SELECT rowid, distance
                     FROM vec_media
@@ -225,6 +235,7 @@ impl MediaRepository for SqliteRepository {
                     LIMIT ?2
                  ) v
                  JOIN media m ON m.rowid = v.rowid
+                 LEFT JOIN favorites f ON f.media_id = m.id
                  WHERE v.distance <= ?3
                  ORDER BY v.distance"
             ).map_err(|e| DomainError::Database(e.to_string()))?;
@@ -241,6 +252,7 @@ impl MediaRepository for SqliteRepository {
                 let height: Option<u32> = row.get(8)?;
                 let size_bytes: i64 = row.get(9)?;
                 let exif_json: Option<String> = row.get(10)?;
+                let is_favorite: bool = row.get(12)?;
 
                 let id = Uuid::from_slice(&id_bytes).map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Blob, Box::new(e)))?;
                 let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str)
@@ -262,6 +274,7 @@ impl MediaRepository for SqliteRepository {
                     height,
                     size_bytes,
                     exif_json,
+                    is_favorite,
                 })
             }).map_err(|e| DomainError::Database(e.to_string()))?;
 
@@ -277,8 +290,10 @@ impl MediaRepository for SqliteRepository {
     fn find_by_id(&self, id: Uuid) -> Result<Option<MediaItem>, DomainError> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, filename, original_filename, media_type, phash, uploaded_at, original_date, width, height, size_bytes, exif_json
-                 FROM media WHERE id = ?1"
+                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite
+                 FROM media m
+                 LEFT JOIN favorites f ON f.media_id = m.id
+                 WHERE m.id = ?1"
             ).map_err(|e| DomainError::Database(e.to_string()))?;
 
             let result = stmt.query_row(params![id.as_bytes()], |row| {
@@ -293,6 +308,7 @@ impl MediaRepository for SqliteRepository {
                 let height: Option<u32> = row.get(8)?;
                 let size_bytes: i64 = row.get(9)?;
                 let exif_json: Option<String> = row.get(10)?;
+                let is_favorite: bool = row.get(11)?;
 
                 let id = Uuid::from_slice(&id_bytes).map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Blob, Box::new(e)))?;
                 let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str)
@@ -302,7 +318,7 @@ impl MediaRepository for SqliteRepository {
                     .map_err(|e| rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e)))?
                     .with_timezone(&Utc);
 
-                Ok(MediaItem { id, filename, original_filename, media_type, phash, uploaded_at, original_date, width, height, size_bytes, exif_json })
+                Ok(MediaItem { id, filename, original_filename, media_type, phash, uploaded_at, original_date, width, height, size_bytes, exif_json, is_favorite })
             });
 
             match result {
@@ -323,6 +339,12 @@ impl MediaRepository for SqliteRepository {
                 .prepare("SELECT rowid FROM media WHERE id = ?1")
                 .and_then(|mut s| s.query_row(params![id.as_bytes()], |r| r.get(0)))
                 .ok();
+
+            // Clean up favorites manually if foreign keys aren't enabled
+            let _ = conn.execute(
+                "DELETE FROM favorites WHERE media_id = ?1",
+                params![id.as_bytes()],
+            );
 
             let deleted = conn
                 .execute("DELETE FROM media WHERE id = ?1", params![id.as_bytes()])
@@ -401,6 +423,12 @@ impl MediaRepository for SqliteRepository {
                     .and_then(|mut s| s.query_row(params![id.as_bytes()], |r| r.get(0)))
                     .ok();
 
+                // Clean up favorites manually
+                let _ = conn.execute(
+                    "DELETE FROM favorites WHERE media_id = ?1",
+                    params![id.as_bytes()],
+                );
+
                 let count = conn
                     .execute("DELETE FROM media WHERE id = ?1", params![id.as_bytes()])
                     .map_err(|e| {
@@ -426,43 +454,45 @@ impl MediaRepository for SqliteRepository {
         limit: usize,
         offset: usize,
         media_type: Option<&str>,
+        favorite: bool,
         sort_asc: bool,
     ) -> Result<Vec<MediaSummary>, DomainError> {
         self.with_conn(|conn| {
             let order = if sort_asc { "ASC" } else { "DESC" };
-
-            let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match media_type
-            {
-                Some(mt) => (
-                    format!(
-                        "SELECT id, filename, original_filename, media_type, uploaded_at, original_date
-                         FROM media
-                         WHERE media_type = ?1
-                         ORDER BY original_date {}
-                         LIMIT ?2 OFFSET ?3",
-                        order
-                    ),
-                    vec![
-                        Box::new(mt.to_string()) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(limit as i64),
-                        Box::new(offset as i64),
-                    ],
-                ),
-                None => (
-                    format!(
-                        "SELECT id, filename, original_filename, media_type, uploaded_at, original_date
-                         FROM media
-                         ORDER BY original_date {}
-                         LIMIT ?1 OFFSET ?2",
-                        order
-                    ),
-                    vec![
-                        Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(offset as i64),
-                    ],
-                ),
-            };
-
+            
+            // Base query with join
+            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite
+                         FROM media m
+                         LEFT JOIN favorites f ON f.media_id = m.id".to_string();
+            
+            let mut conditions = Vec::new();
+            let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            
+            if let Some(mt) = media_type {
+                conditions.push("m.media_type = ?");
+                params_vec.push(Box::new(mt.to_string()));
+            }
+            
+            if favorite {
+                conditions.push("f.media_id IS NOT NULL");
+            }
+            
+            if !conditions.is_empty() {
+                sql.push_str(" WHERE ");
+                sql.push_str(&conditions.join(" AND "));
+            }
+            
+            sql.push_str(&format!(" ORDER BY m.original_date {} LIMIT ? OFFSET ?", order));
+            params_vec.push(Box::new(limit as i64));
+            params_vec.push(Box::new(offset as i64));
+            
+            // Re-map params
+            // We have to build params carefully because `?` placeholders are usually 1-indexed in rusqlite if not using names, 
+            // but here we are appending strings. Wait, rusqlite uses `?1`, `?2` or just `?`. 
+            // If I use `?`, they map sequentially. The original code used `?1`, `?2`.
+            // I should stick to `?` and sequential parameters for dynamic query building or carefully index.
+            // Using `?` is safer here since I'm pushing to `params_vec` in order.
+            
             let mut stmt = conn
                 .prepare(&sql)
                 .map_err(|e| DomainError::Database(e.to_string()))?;
@@ -478,6 +508,7 @@ impl MediaRepository for SqliteRepository {
                     let media_type: String = row.get(3)?;
                     let timestamp_str: String = row.get(4)?;
                     let original_date_str: String = row.get(5)?;
+                    let is_favorite: bool = row.get(6)?;
 
                     let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -512,6 +543,7 @@ impl MediaRepository for SqliteRepository {
                         media_type,
                         uploaded_at,
                         original_date,
+                        is_favorite,
                     })
                 })
                 .map_err(|e| DomainError::Database(e.to_string()))?;
@@ -547,6 +579,24 @@ impl MediaRepository for SqliteRepository {
                 })
             })
             .map_err(|e| DomainError::Database(e.to_string()))
+        })
+    }
+
+    fn set_favorite(&self, id: Uuid, favorite: bool) -> Result<(), DomainError> {
+        self.with_conn(|conn| {
+            if favorite {
+                conn.execute(
+                    "INSERT OR IGNORE INTO favorites (media_id, created_at) VALUES (?1, ?2)",
+                    params![id.as_bytes(), Utc::now().to_rfc3339()],
+                )
+            } else {
+                conn.execute(
+                    "DELETE FROM favorites WHERE media_id = ?1",
+                    params![id.as_bytes()],
+                )
+            }
+            .map_err(|e| DomainError::Database(e.to_string()))?;
+            Ok(())
         })
     }
 
@@ -741,45 +791,35 @@ impl MediaRepository for SqliteRepository {
         limit: usize,
         offset: usize,
         media_type: Option<&str>,
+        favorite: bool,
         sort_asc: bool,
     ) -> Result<Vec<MediaSummary>, DomainError> {
         self.with_conn(|conn| {
             let order = if sort_asc { "ASC" } else { "DESC" };
+            
+            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite
+                           FROM media m
+                           JOIN folder_media fm ON fm.media_id = m.id
+                           LEFT JOIN favorites f ON f.media_id = m.id
+                           WHERE fm.folder_id = ?".to_string();
+            
+            let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+                Box::new(folder_id.as_bytes().to_vec())
+            ];
+            
+            if let Some(mt) = media_type {
+                sql.push_str(" AND m.media_type = ?");
+                params_vec.push(Box::new(mt.to_string()));
+            }
 
-            let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match media_type {
-                Some(mt) => (
-                    format!(
-                        "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date
-                         FROM media m
-                         JOIN folder_media fm ON fm.media_id = m.id
-                         WHERE fm.folder_id = ?1 AND m.media_type = ?2
-                         ORDER BY m.original_date {}
-                         LIMIT ?3 OFFSET ?4", order
-                    ),
-                    vec![
-                        Box::new(folder_id.as_bytes().to_vec()) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(mt.to_string()),
-                        Box::new(limit as i64),
-                        Box::new(offset as i64),
-                    ],
-                ),
-                None => (
-                    format!(
-                        "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date
-                         FROM media m
-                         JOIN folder_media fm ON fm.media_id = m.id
-                         WHERE fm.folder_id = ?1
-                         ORDER BY m.original_date {}
-                         LIMIT ?2 OFFSET ?3", order
-                    ),
-                    vec![
-                        Box::new(folder_id.as_bytes().to_vec()) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(limit as i64),
-                        Box::new(offset as i64),
-                    ],
-                ),
-            };
-
+            if favorite {
+                sql.push_str(" AND f.media_id IS NOT NULL");
+            }
+            
+            sql.push_str(&format!(" ORDER BY m.original_date {} LIMIT ? OFFSET ?", order));
+            params_vec.push(Box::new(limit as i64));
+            params_vec.push(Box::new(offset as i64));
+            
             let mut stmt = conn.prepare(&sql).map_err(|e| DomainError::Database(e.to_string()))?;
             let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
 
@@ -790,6 +830,7 @@ impl MediaRepository for SqliteRepository {
                 let media_type: String = row.get(3)?;
                 let timestamp_str: String = row.get(4)?;
                 let original_date_str: String = row.get(5)?;
+                let is_favorite: bool = row.get(6)?;
 
                 let id = Uuid::from_slice(&id_bytes).map_err(|e|
                     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Blob, Box::new(e)))?;
@@ -800,7 +841,7 @@ impl MediaRepository for SqliteRepository {
                     .map_err(|e| rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e)))?
                     .with_timezone(&Utc);
 
-                Ok(MediaSummary { id, filename, original_filename, media_type, uploaded_at, original_date })
+                Ok(MediaSummary { id, filename, original_filename, media_type, uploaded_at, original_date, is_favorite })
             }).map_err(|e| DomainError::Database(e.to_string()))?;
 
             let mut items = Vec::new();
@@ -837,7 +878,7 @@ impl MediaRepository for SqliteRepository {
                     .map_err(|e| rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e)))?
                     .with_timezone(&Utc);
 
-                Ok(MediaSummary { id, filename, original_filename, media_type, uploaded_at, original_date })
+                Ok(MediaSummary { id, filename, original_filename, media_type, uploaded_at, original_date, is_favorite: false })
             }).map_err(|e| DomainError::Database(e.to_string()))?;
 
             let mut items = Vec::new();
@@ -891,7 +932,7 @@ impl MediaRepository for SqliteRepository {
                     .map_err(|e| rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e)))?
                     .with_timezone(&Utc);
 
-                let summary = MediaSummary { id, filename, original_filename, media_type, uploaded_at, original_date };
+                let summary = MediaSummary { id, filename, original_filename, media_type, uploaded_at, original_date, is_favorite: false };
 
                 // Parse embedding bytes into f32 vec
                 if embedding_bytes.len() % 4 != 0 {

@@ -193,6 +193,20 @@ export default function App() {
                     />
                 </div>
 
+                <div className={activeTab === 'favorites' ? '' : 'hidden'}>
+                    <GalleryView
+                        filter={mediaFilter}
+                        onFilterChange={handleFilterChange}
+                        refreshKey={refreshKey}
+                        folders={folders}
+                        onFoldersChanged={fetchFolders}
+                        onUploadComplete={handleUploadComplete}
+                        onBusyChange={setIsBusy}
+                        onFindSimilar={handleFindSimilar}
+                        favoritesOnly={true}
+                    />
+                </div>
+
                 <div className={activeTab === 'search' ? '' : 'hidden'}>
                     <SearchView initialMediaId={activeSearchMediaId} />
                 </div>

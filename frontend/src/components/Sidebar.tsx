@@ -1,9 +1,9 @@
 import {useState, useEffect, useCallback, useRef} from 'react';
-import {PhotoIcon, SearchIcon} from './Icons';
+import {PhotoIcon, SearchIcon, HeartIcon} from './Icons';
 import type {Folder} from '../types';
 import {apiFetch} from '../auth';
 
-export type Tab = 'gallery' | 'search' | 'folder';
+export type Tab = 'gallery' | 'search' | 'folder' | 'favorites';
 
 interface SidebarProps {
     activeTab: Tab;
@@ -230,6 +230,13 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${activeTab === 'gallery' ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
                 >
                     <PhotoIcon/> Gallery
+                </button>
+                <button
+                    onClick={() => onTabChange('favorites')}
+                    disabled={disabled}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${activeTab === 'favorites' ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                >
+                    <HeartIcon/> Favorites
                 </button>
                 <button
                     onClick={() => onTabChange('search')}

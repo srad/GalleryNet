@@ -9,6 +9,7 @@ export interface MediaItem {
     width?: number;
     height?: number;
     exif_json?: string;
+    is_favorite?: boolean;
 }
 
 export type MediaFilter = 'all' | 'image' | 'video';

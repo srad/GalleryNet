@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MediaItem } from '../types';
 import { apiFetch } from '../auth';
+import { HeartIcon } from './Icons';
 
 interface MediaModalProps {
     item: MediaItem;
@@ -8,6 +9,7 @@ interface MediaModalProps {
     onPrev: (() => void) | null;
     onNext: (() => void) | null;
     onFindSimilar?: (id: string) => void;
+    onToggleFavorite?: () => void;
 }
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'wmv']);
@@ -40,7 +42,7 @@ function formatBytes(bytes: number): string {
     return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimilar }: MediaModalProps) {
+export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimilar, onToggleFavorite }: MediaModalProps) {
     const backdropRef = useRef<HTMLDivElement>(null);
     const video = isVideo(item.filename);
     const mediaUrl = `/uploads/${item.filename}`;
@@ -254,6 +256,21 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
 
                     {/* Actions */}
                     <div className="mt-5 flex flex-col gap-2">
+                        {/* Favorite Button */}
+                        {onToggleFavorite && (
+                            <button
+                                onClick={onToggleFavorite}
+                                className={`flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium rounded-lg transition-colors border ${
+                                    displayItem.is_favorite
+                                        ? 'bg-red-500 text-white border-red-600 hover:bg-red-600'
+                                        : 'bg-white/10 text-white hover:bg-white/20 border-white/10'
+                                }`}
+                            >
+                                <HeartIcon solid={displayItem.is_favorite} />
+                                {displayItem.is_favorite ? 'Favorited' : 'Add to Favorites'}
+                            </button>
+                        )}
+
                         {/* Find Similar Button */}
                         {onFindSimilar && item.id && (
                             <button

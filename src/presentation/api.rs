@@ -37,6 +37,7 @@ pub struct Pagination {
     pub page: Option<usize>,
     pub limit: Option<usize>,
     pub media_type: Option<String>,
+    pub favorite: Option<bool>,
     /// Sort direction for original_date: "asc" or "desc" (default "desc")
     pub sort: Option<String>,
 }
@@ -86,6 +87,7 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media/download", post(batch_download_handler))
         .route("/media/group", post(group_media_handler))
         .route("/media/{id}", get(get_media_handler).delete(delete_handler))
+        .route("/media/{id}/favorite", post(toggle_favorite_handler))
         .route("/media/{id}/similar", get(search_by_id_handler))
         .route("/stats", get(stats_handler))
         .route("/folders", get(list_folders_handler).post(create_folder_handler))
@@ -201,7 +203,8 @@ async fn list_handler(
     let page = if page < 1 { 1 } else { page };
     
     let sort_asc = pagination.sort.as_deref() == Some("asc");
-    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), sort_asc).await?;
+    let favorite = pagination.favorite.unwrap_or(false);
+    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, sort_asc).await?;
     
     Ok(Json(results))
 }
@@ -458,6 +461,20 @@ async fn delete_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct FavoriteRequest {
+    pub favorite: bool,
+}
+
+async fn toggle_favorite_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<FavoriteRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.repo.set_favorite(id, body.favorite)?;
+    Ok(StatusCode::OK)
+}
+
 async fn batch_delete_handler(
     State(state): State<AppState>,
     Json(ids): Json<Vec<Uuid>>,
@@ -658,6 +675,7 @@ struct FolderPagination {
     limit: Option<usize>,
     media_type: Option<String>,
     sort: Option<String>,
+    favorite: Option<bool>,
 }
 
 async fn list_folder_media_handler(
@@ -669,8 +687,9 @@ async fn list_folder_media_handler(
     let limit = pagination.limit.unwrap_or(20);
     let offset = (page - 1) * limit;
     let sort_asc = pagination.sort.as_deref() == Some("asc");
+    let favorite = pagination.favorite.unwrap_or(false);
 
-    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), sort_asc)?;
+    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), favorite, sort_asc)?;
     Ok(Json(results))
 }
 

@@ -1,4 +1,5 @@
 import type { MediaItem } from '../types';
+import { HeartIcon } from './Icons';
 
 interface MediaCardProps {
     item: MediaItem;
@@ -9,6 +10,7 @@ interface MediaCardProps {
     selectionMode?: boolean;
     /** Called when the selection checkbox is toggled */
     onSelect?: (e: React.MouseEvent) => void;
+    onToggleFavorite?: () => void;
 }
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'wmv']);
@@ -25,7 +27,7 @@ function isVideo(filename: string): boolean {
     return VIDEO_EXTENSIONS.has(ext);
 }
 
-export default function MediaCard({ item, onClick, selected, selectionMode, onSelect }: MediaCardProps) {
+export default function MediaCard({ item, onClick, selected, selectionMode, onSelect, onToggleFavorite }: MediaCardProps) {
     const video = isVideo(item.filename);
 
     return (
@@ -78,6 +80,24 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
                         )}
                     </div>
                 </div>
+            )}
+
+            {/* Favorite button */}
+            {!selectionMode && onToggleFavorite && (
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleFavorite();
+                    }}
+                    className={`absolute top-1.5 right-1.5 z-10 p-1.5 rounded-full transition-all ${
+                        item.is_favorite
+                            ? 'text-red-500 shadow-sm'
+                            : 'text-white/70 hover:text-white opacity-0 group-hover:opacity-100'
+                    }`}
+                    title={item.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                >
+                    <HeartIcon solid={item.is_favorite} />
+                </button>
             )}
 
             {/* Play button overlay for videos */}

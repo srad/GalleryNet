@@ -41,9 +41,12 @@ pub trait MediaRepository: Send + Sync {
         limit: usize,
         offset: usize,
         media_type: Option<&str>,
+        favorite: bool,
         sort_asc: bool,
     ) -> Result<Vec<MediaSummary>, DomainError>;
     fn media_counts(&self) -> Result<MediaCounts, DomainError>;
+
+    fn set_favorite(&self, id: uuid::Uuid, favorite: bool) -> Result<(), DomainError>;
 
     // --- Folder operations ---
     fn create_folder(&self, id: uuid::Uuid, name: &str) -> Result<Folder, DomainError>;
@@ -69,6 +72,7 @@ pub trait MediaRepository: Send + Sync {
         limit: usize,
         offset: usize,
         media_type: Option<&str>,
+        favorite: bool,
         sort_asc: bool,
     ) -> Result<Vec<MediaSummary>, DomainError>;
     fn get_folder_media_files(

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import type { MediaItem, MediaFilter, Folder, MediaGroup } from '../types';
-import { PhotoIcon, UploadIcon, PlusIcon } from './Icons';
+import { PhotoIcon, UploadIcon, PlusIcon, HeartIcon } from './Icons';
 import MediaCard from './MediaCard';
 import MediaModal from './MediaModal';
 import { apiFetch, fireUnauthorized } from '../auth';
@@ -61,6 +61,7 @@ interface GalleryViewProps {
     onPick?: (ids: string[]) => void;
     onCancelPick?: () => void;
     onFindSimilar?: (id: string) => void;
+    favoritesOnly?: boolean;
 }
 
 type SortOrder = 'desc' | 'asc';
@@ -81,7 +82,7 @@ const FILTERS: { value: MediaFilter; label: string }[] = [
     { value: 'video', label: 'Videos' },
 ];
 
-export default function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar }: GalleryViewProps) {
+export default function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar, favoritesOnly }: GalleryViewProps) {
     const [media, setMedia] = useState<MediaItem[]>([]);
     const [hasMore, setHasMore] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
@@ -90,6 +91,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         const saved = localStorage.getItem('gallerySortOrder');
         return saved === 'asc' ? 'asc' : 'desc';
     });
+    const [viewFavorites, setViewFavorites] = useState(favoritesOnly || false);
     const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
 
     // --- Grouping state ---
@@ -300,11 +302,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         if (currentFilter !== 'all') {
             params.set('media_type', currentFilter);
         }
+        if (viewFavorites) {
+            params.set('favorite', 'true');
+        }
         if (folderId) {
             return `/api/folders/${folderId}/media?${params}`;
         }
         return `/api/media?${params}`;
-    }, [folderId]);
+    }, [folderId, viewFavorites]);
 
     // --- Fetch a single page ---
     const fetchPage = useCallback(async (pageNum: number, currentFilter: MediaFilter, currentSort: SortOrder, append: boolean) => {
@@ -393,7 +398,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         setInitialLoad(true);
         exitSelectionMode();
         fetchPage(1, filter, sortOrder, false);
-    }, [filter, sortOrder, fetchPage, exitSelectionMode, isGrouped]);
+    }, [filter, sortOrder, fetchPage, exitSelectionMode, isGrouped, viewFavorites]);
 
     // --- Picker mode auto-select ---
     useEffect(() => {
@@ -401,6 +406,27 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             setSelectionMode(true);
         }
     }, [isPicker]);
+
+    // --- Toggle favorite handler ---
+    const handleToggleFavorite = useCallback(async (item: MediaItem) => {
+        if (!item.id) return;
+        const newStatus = !item.is_favorite;
+        
+        // Optimistic update
+        setMedia(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: newStatus } : m));
+        
+        try {
+            await apiFetch(`/api/media/${item.id}/favorite`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ favorite: newStatus }),
+            });
+        } catch (e) {
+            console.error('Toggle favorite error:', e);
+            // Revert
+            setMedia(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: !newStatus } : m));
+        }
+    }, []);
 
     // --- Handle items picked from library (when acting as picker parent) ---
     const handlePickItems = useCallback(async (ids: string[]) => {
@@ -938,6 +964,24 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                             </button>
                         ))}
                     </div>
+
+                    {/* Favorites Toggle (only in gallery/folder view) */}
+                    {!favoritesOnly && (
+                        <button
+                            onClick={() => setViewFavorites(v => !v)}
+                            disabled={isGroupComputing}
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+                                viewFavorites
+                                    ? 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
+                                    : 'text-gray-600 bg-white border border-gray-300 hover:bg-gray-50'
+                            }`}
+                            title={viewFavorites ? "Show all items" : "Show favorites only"}
+                        >
+                            <HeartIcon solid={viewFavorites} />
+                            <span className="hidden sm:inline">Favorites</span>
+                        </button>
+                    )}
+
                     <button
                         onClick={() => setSortOrder(s => {
                             const next = s === 'desc' ? 'asc' : 'desc';
@@ -1140,6 +1184,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                     selected={selected.has(item.filename)}
                                     selectionMode={selectionMode}
                                     onSelect={(e) => handleSelect(item.filename, e)}
+                                    onToggleFavorite={() => handleToggleFavorite(item)}
                                 />
                             </Fragment>
                         );
@@ -1180,14 +1225,16 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-0.5">
                                 {group.items.map((item) => (
                                     <MediaCard
-                                        key={item.filename}
-                                        item={item}
-                                        onClick={() => setSelectedFilename(item.filename)}
-                                        selected={false}
-                                        selectionMode={false}
-                                    />
-                                ))}
-                            </div>
+                        key={item.filename}
+                        item={item}
+                        onClick={() => setSelectedFilename(item.filename)}
+                        selected={selected.has(item.filename)}
+                        selectionMode={selectionMode}
+                        onSelect={(e) => handleSelect(item.filename, e)}
+                        onToggleFavorite={() => handleToggleFavorite(item)}
+                    />
+                ))}
+            </div>
                         </div>
                     ))}
                 </div>
@@ -1435,6 +1482,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         onPrev={prevItem ? () => setSelectedFilename(prevItem!.filename) : null}
                         onNext={nextItem ? () => setSelectedFilename(nextItem!.filename) : null}
                         onFindSimilar={onFindSimilar}
+                        onToggleFavorite={() => handleToggleFavorite(item!)}
                     />
                 );
             })()}

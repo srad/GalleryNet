@@ -5,7 +5,7 @@
 <h1 align="center">GalleryNet</h1>
 
 <p align="center">
-  <strong>Self-hosted media gallery with AI-powered visual similarity search</strong>
+  <strong>Self-hosted media gallery with AI-powered visual similarity search, grouping, tagging</strong>
 </p>
 
 <p align="center">

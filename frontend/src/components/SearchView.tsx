@@ -78,10 +78,10 @@ export default function SearchView({ initialMediaId }: SearchViewProps) {
 
     return (
         <div className="max-w-7xl mx-auto h-full flex flex-col">
-            <h2 className="text-3xl font-bold text-gray-900 mb-6 shrink-0">Visual Search</h2>
+            <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-4 md:mb-6 shrink-0">Visual Search</h2>
 
-            <div className="bg-white border border-gray-200 p-8 rounded-2xl shadow-sm mb-8 shrink-0">
-                <div className="flex flex-col md:flex-row gap-8 items-start md:items-center">
+            <div className="bg-white border border-gray-200 p-4 sm:p-6 md:p-8 rounded-2xl shadow-sm mb-4 sm:mb-8 shrink-0">
+                <div className="flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center">
                     <div className="flex-1 w-full">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Reference Image</label>
                         
@@ -142,7 +142,7 @@ export default function SearchView({ initialMediaId }: SearchViewProps) {
                     <h3 className="text-lg font-semibold text-gray-900 mb-4 border-b pb-2 sticky top-0 bg-gray-50 z-10">
                         Matches Found ({searchResults.length})
                     </h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6 pb-8">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-4 md:gap-6 pb-8">
                         {searchResults.map((item) => (
                             <MediaCard key={`search-${item.id}`} item={item} />
                         ))}

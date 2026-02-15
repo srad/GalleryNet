@@ -16,6 +16,10 @@ interface SidebarProps {
     onFoldersChanged: () => void;
     /** When true, all navigation is disabled (e.g. during group computation) */
     disabled?: boolean;
+    /** Whether the mobile sidebar drawer is open */
+    mobileOpen?: boolean;
+    /** Called to close the mobile sidebar drawer */
+    onMobileClose?: () => void;
 }
 
 interface Stats {
@@ -36,7 +40,7 @@ function formatBytes(bytes: number): string {
     return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, folders, activeFolder, onSelectFolder, onFoldersChanged, disabled}: SidebarProps) {
+export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, folders, activeFolder, onSelectFolder, onFoldersChanged, disabled, mobileOpen, onMobileClose}: SidebarProps) {
     const [stats, setStats] = useState<Stats | null>(null);
     const [newFolderName, setNewFolderName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
@@ -192,14 +196,31 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
         : 0;
 
     return (
-        <aside className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
-            <div className="p-6 border-b border-gray-100">
-                <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
-                    GalleryNet
-                </h1>
-                {stats && (
-                    <p className="text-[10px] text-gray-400 mt-0.5">v{stats.version}</p>
-                )}
+        <aside className={`
+            fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0
+            transition-transform duration-200 ease-in-out
+            md:relative md:z-auto md:translate-x-0
+            ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}>
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
+                        GalleryNet
+                    </h1>
+                    {stats && (
+                        <p className="text-[10px] text-gray-400 mt-0.5">v{stats.version}</p>
+                    )}
+                </div>
+                {/* Close button (mobile only) */}
+                <button
+                    onClick={onMobileClose}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors md:hidden"
+                    aria-label="Close menu"
+                >
+                    <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
             </div>
 
             <nav className={`flex-1 p-4 space-y-2 overflow-y-auto ${disabled ? 'pointer-events-none' : ''}`}>

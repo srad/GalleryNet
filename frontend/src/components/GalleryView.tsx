@@ -17,15 +17,15 @@ function LibraryPicker({ onPick, onCancel, refreshKey, folders, onFoldersChanged
     const [filter, setFilter] = useState<MediaFilter>('all');
     return (
         <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col">
-            <div className="flex items-center justify-between px-8 py-4 bg-white border-b border-gray-200">
-                <h2 className="text-xl font-bold">Select Media to Add</h2>
+            <div className="flex items-center justify-between px-4 sm:px-8 py-3 sm:py-4 bg-white border-b border-gray-200">
+                <h2 className="text-lg sm:text-xl font-bold">Select Media to Add</h2>
                 <button onClick={onCancel} className="p-2 hover:bg-gray-100 rounded-full" title="Close">
                     <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                 </button>
             </div>
-            <main className="flex-1 overflow-y-auto p-8">
+            <main className="flex-1 overflow-y-auto p-4 sm:p-8">
                 <GalleryView
                     filter={filter}
                     onFilterChange={setFilter}
@@ -873,32 +873,62 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
     return (
         <div ref={scrollContainerRef} className="max-w-7xl mx-auto">
-            <div className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-3">
-                    {folderId && onBackToGallery && (
-                        <button
-                            onClick={onBackToGallery}
-                            disabled={isGroupComputing}
-                            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                            title="Back to gallery"
-                        >
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-                            </svg>
-                        </button>
+            <div className="flex flex-col gap-3 mb-4 md:mb-6">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                        {folderId && onBackToGallery && (
+                            <button
+                                onClick={onBackToGallery}
+                                disabled={isGroupComputing}
+                                className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:pointer-events-none flex-shrink-0"
+                                title="Back to gallery"
+                            >
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                                </svg>
+                            </button>
+                        )}
+                        <h2 className="text-2xl md:text-3xl font-bold text-gray-900 truncate">
+                            {folderId && folderName ? folderName : 'Gallery'}
+                        </h2>
+                    </div>
+                    {/* Upload button - always visible on the right */}
+                    {!isPicker && (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={uploadState?.active || isGroupComputing}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-900 border border-gray-900 rounded-lg shadow-sm hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                                title={folderId ? "Upload files to this folder" : "Upload media"}
+                            >
+                                <UploadIcon />
+                                <span className="hidden sm:inline">Upload</span>
+                            </button>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*,video/*"
+                                multiple
+                                className="hidden"
+                                onChange={(e) => {
+                                    if (e.target.files && e.target.files.length > 0) {
+                                        handleUpload(e.target.files);
+                                        e.target.value = '';
+                                    }
+                                }}
+                            />
+                        </div>
                     )}
-                    <h2 className="text-3xl font-bold text-gray-900">
-                        {folderId && folderName ? folderName : 'Gallery'}
-                    </h2>
                 </div>
-                <div className="flex items-center gap-3">
+                {/* Controls row - wraps on mobile */}
+                <div className="flex flex-wrap items-center gap-2 md:gap-3">
                     <div className={`flex bg-white border border-gray-300 rounded-lg overflow-hidden shadow-sm ${isGroupComputing ? 'opacity-50 pointer-events-none' : ''}`}>
                         {FILTERS.map(({ value, label }) => (
                             <button
                                 key={value}
                                 onClick={() => onFilterChange(value)}
                                 disabled={isGroupComputing}
-                                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                                className={`px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-colors ${
                                     filter === value
                                         ? 'bg-gray-900 text-white'
                                         : 'text-gray-600 hover:bg-gray-50'
@@ -915,7 +945,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                             return next;
                         })}
                         disabled={isGroupComputing}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
                         title={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
                     >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -925,14 +955,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0l-3.75-3.75M17.25 21L21 17.25" />
                             )}
                         </svg>
-                        {sortOrder === 'desc' ? 'Newest' : 'Oldest'}
+                        <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
                     </button>
 
                     {/* Group toggle */}
                     <button
                         onClick={() => setIsGrouped(g => !g)}
                         disabled={isGroupComputing}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+                        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:pointer-events-none ${
                             isGrouped
                                 ? 'bg-purple-600 text-white border border-purple-600 hover:bg-purple-700'
                                 : 'text-gray-600 bg-white border border-gray-300 hover:bg-gray-50'
@@ -942,7 +972,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
                         </svg>
-                        Group
+                        <span className="hidden sm:inline">Group</span>
                     </button>
 
                     {/* Similarity Slider (Grouped View) */}
@@ -960,7 +990,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                 onPointerUp={commitGroupSimilarity}
                                 onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') commitGroupSimilarity(); }}
                                 disabled={isGroupComputing}
-                                className="w-24 accent-purple-600 cursor-pointer h-1.5 bg-gray-200 rounded-lg appearance-none disabled:opacity-50 disabled:pointer-events-none"
+                                className="w-20 sm:w-24 accent-purple-600 cursor-pointer h-1.5 bg-gray-200 rounded-lg appearance-none disabled:opacity-50 disabled:pointer-events-none"
                                 title="Adjust similarity grouping threshold"
                             />
                         </div>
@@ -970,7 +1000,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     {media.length > 0 && !isGrouped && (
                         <button
                             onClick={() => selectionMode ? exitSelectionMode() : setSelectionMode(true)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg shadow-sm transition-colors ${
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors ${
                                 selectionMode
                                     ? 'bg-blue-600 text-white border border-blue-600 hover:bg-blue-700'
                                     : 'text-gray-600 bg-white border border-gray-300 hover:bg-gray-50'
@@ -980,7 +1010,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            {selectionMode ? 'Cancel' : 'Select'}
+                            <span className="hidden sm:inline">{selectionMode ? 'Cancel' : 'Select'}</span>
                         </button>
                     )}
 
@@ -989,11 +1019,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <button
                             onClick={() => setShowPicker(true)}
                             disabled={isGroupComputing}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
                             title="Add existing media from library"
                         >
                             <PlusIcon />
-                            Add from Library
+                            <span className="hidden sm:inline">Add from Library</span>
                         </button>
                     )}
 
@@ -1002,42 +1032,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <button
                             onClick={handleDownloadFolder}
                             disabled={isDownloading || isGroupComputing}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
+                            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
                             title="Download all items in folder"
                         >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
                             </svg>
-                            Download All
+                            <span className="hidden sm:inline">Download All</span>
                         </button>
-                    )}
-
-                    {/* Inline upload */}
-                    {!isPicker && (
-                        <>
-                            <button
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={uploadState?.active || isGroupComputing}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-900 border border-gray-900 rounded-lg shadow-sm hover:bg-gray-800 disabled:opacity-50 transition-colors"
-                            title={folderId ? "Upload files to this folder" : "Upload media"}
-                        >
-                            <UploadIcon />
-                            Upload
-                        </button>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*,video/*"
-                            multiple
-                            className="hidden"
-                            onChange={(e) => {
-                                if (e.target.files && e.target.files.length > 0) {
-                                    handleUpload(e.target.files);
-                                    e.target.value = '';
-                                }
-                            }}
-                        />
-                    </>
                     )}
                 </div>
             </div>
@@ -1108,7 +1110,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 <div
                     ref={gridRef}
                     onMouseDown={handleGridMouseDown}
-                    className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9 gap-0.5 select-none"
+                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-0.5 select-none"
                 >
                     {media.map((item, index) => {
                         const date = new Date(item.original_date);
@@ -1175,7 +1177,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                     {group.items.length} items
                                 </span>
                             </div>
-                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-0.5">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-0.5">
                                 {group.items.map((item) => (
                                     <MediaCard
                                         key={item.filename}
@@ -1234,15 +1236,15 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
             {/* Floating selection toolbar */}
             {selectionMode && selected.size > 0 && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 bg-gray-900 text-white rounded-2xl shadow-2xl">
-                    <span className="text-sm font-medium mr-1">
+                <div className="fixed bottom-4 sm:bottom-6 left-2 right-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-3 bg-gray-900 text-white rounded-2xl shadow-2xl">
+                    <span className="text-xs sm:text-sm font-medium mr-1">
                         {selected.size} selected
                     </span>
 
                     {/* Select all / deselect all */}
                     <button
                         onClick={handleSelectAll}
-                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
+                        className="px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
                     >
                         {selected.size === media.length ? 'Deselect all' : 'Select all'}
                     </button>
@@ -1257,10 +1259,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                         .map(m => m.id!);
                                     onPick?.(ids);
                                 }}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors"
+                                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors"
                             >
                                 <PlusIcon />
-                                Add selection
+                                <span className="hidden sm:inline">Add selection</span>
+                                <span className="sm:hidden">Add</span>
                             </button>
                             <button
                                 onClick={onCancelPick}
@@ -1280,17 +1283,17 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <button
                             onClick={() => setShowFolderPicker(prev => !prev)}
                             disabled={isAddingToFolder}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 transition-colors"
                         >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 10.5v6m3-3H9m4.06-7.19l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                             </svg>
-                            {isAddingToFolder ? 'Adding...' : 'Add to folder'}
+                            <span className="hidden sm:inline">{isAddingToFolder ? 'Adding...' : 'Add to folder'}</span>
                         </button>
 
                         {/* Folder picker dropdown */}
                         {showFolderPicker && (
-                            <div className="absolute bottom-full mb-2 left-0 bg-white text-gray-800 rounded-xl shadow-2xl border border-gray-200 py-1 min-w-[180px] max-h-60 overflow-y-auto">
+                            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 sm:left-0 sm:translate-x-0 bg-white text-gray-800 rounded-xl shadow-2xl border border-gray-200 py-1 min-w-[180px] max-h-60 overflow-y-auto">
                                 {folders.length === 0 ? (
                                     <p className="px-3 py-2 text-xs text-gray-400">No folders yet</p>
                                 ) : (
@@ -1317,12 +1320,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <button
                             onClick={handleRemoveFromFolder}
                             disabled={isDeleting}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 transition-colors"
+                            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 transition-colors"
                         >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            Remove
+                            <span className="hidden sm:inline">Remove</span>
                         </button>
                     )}
 
@@ -1330,24 +1333,24 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     <button
                         onClick={handleBatchDownload}
                         disabled={isDownloading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
                         </svg>
-                        {isDownloading ? 'Downloading...' : 'Download'}
+                        <span className="hidden sm:inline">{isDownloading ? 'Downloading...' : 'Download'}</span>
                     </button>
 
                     {/* Delete */}
                     <button
                         onClick={handleBatchDelete}
                         disabled={isDeleting}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
+                        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                         </svg>
-                        {isDeleting ? 'Deleting...' : 'Delete'}
+                        <span className="hidden sm:inline">{isDeleting ? 'Deleting...' : 'Delete'}</span>
                     </button>
 
                     {/* Close toolbar */}
@@ -1368,7 +1371,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             {/* Download progress overlay */}
             {isDownloading && downloadProgress && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl px-8 py-6 flex flex-col items-center gap-4 min-w-[280px]">
+                    <div className="bg-white rounded-2xl shadow-2xl px-6 sm:px-8 py-5 sm:py-6 flex flex-col items-center gap-4 mx-4 w-[calc(100%-2rem)] max-w-xs sm:mx-0 sm:w-auto sm:min-w-[280px]">
                         <svg className="w-8 h-8 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />

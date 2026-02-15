@@ -95,18 +95,42 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
         if (e.target === backdropRef.current) onClose();
     }, [onClose]);
 
+    // Touch swipe for mobile navigation
+    const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+    const handleTouchStart = useCallback((e: React.TouchEvent) => {
+        if (e.touches.length === 1) {
+            touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+    }, []);
+
+    const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+        if (!touchStartRef.current || e.changedTouches.length === 0) return;
+        const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
+        const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
+        touchStartRef.current = null;
+
+        // Only trigger if horizontal swipe is dominant and > 60px
+        if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+            if (dx > 0 && onPrev) onPrev();
+            else if (dx < 0 && onNext) onNext();
+        }
+    }, [onPrev, onNext]);
+
     return (
         <div
             ref={backdropRef}
             onClick={handleBackdropClick}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
         >
             {/* Close button */}
             <button
                 onClick={onClose}
-                className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 transition-colors"
+                className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10 p-2.5 sm:p-2 rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 transition-colors"
             >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
             </button>
@@ -115,9 +139,9 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
             {onPrev && (
                 <button
                     onClick={onPrev}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 transition-colors"
+                    className="absolute left-1 sm:left-4 top-1/2 -translate-y-1/2 z-10 p-2.5 sm:p-2 rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 transition-colors"
                 >
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
                     </svg>
                 </button>
@@ -127,16 +151,16 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
             {onNext && (
                 <button
                     onClick={onNext}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 transition-colors"
+                    className="absolute right-1 sm:right-4 top-1/2 -translate-y-1/2 z-10 p-2.5 sm:p-2 rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 transition-colors"
                 >
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                     </svg>
                 </button>
             )}
 
             {/* Content area */}
-            <div className="flex flex-col lg:flex-row max-w-[98vw] max-h-[96vh] gap-3 px-12">
+            <div className="flex flex-col lg:flex-row max-w-[98vw] max-h-[96vh] gap-3 px-2 sm:px-6 lg:px-12">
                 {/* Media display */}
                 <div className="flex items-center justify-center min-w-0 flex-1">
                     {video ? (
@@ -145,20 +169,20 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                             src={mediaUrl}
                             controls
                             autoPlay
-                            className="max-w-full max-h-[94vh] rounded-lg shadow-2xl"
+                            className="max-w-full max-h-[60vh] lg:max-h-[94vh] rounded-lg shadow-2xl"
                         />
                     ) : (
                         <img
                             key={item.filename}
                             src={mediaUrl}
                             alt={item.original_filename || item.filename}
-                            className="max-w-full max-h-[94vh] rounded-lg shadow-2xl object-contain"
+                            className="max-w-full max-h-[60vh] lg:max-h-[94vh] rounded-lg shadow-2xl object-contain"
                         />
                     )}
                 </div>
 
                 {/* Details panel */}
-                <div className="w-full lg:w-72 flex-shrink-0 bg-white/10 backdrop-blur-md rounded-xl p-4 text-white overflow-y-auto max-h-[94vh]">
+                <div className="w-full lg:w-72 flex-shrink-0 bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 text-white overflow-y-auto max-h-[30vh] lg:max-h-[94vh]">
                     <h3 className="text-sm font-semibold text-white/90 mb-4 break-words" title={displayItem.original_filename || displayItem.filename}>
                         {displayItem.original_filename || displayItem.filename}
                     </h3>

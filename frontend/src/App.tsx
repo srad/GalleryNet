@@ -14,6 +14,7 @@ export default function App() {
     const [activeTab, setActiveTab] = useState<Tab>('gallery');
     const [activeFolder, setActiveFolder] = useState<Folder | null>(null);
     const [folders, setFolders] = useState<Folder[]>([]);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
 
     // Listen for 401 events from any API call
     useEffect(() => {
@@ -107,7 +108,13 @@ export default function App() {
             setActiveSearchMediaId(null);
         }
         setActiveTab(tab);
+        setSidebarOpen(false); // Close sidebar on mobile after navigation
     }, []);
+
+    const handleSelectFolderWrapped = useCallback((folder: Folder) => {
+        handleSelectFolder(folder);
+        setSidebarOpen(false); // Close sidebar on mobile after navigation
+    }, [handleSelectFolder]);
 
     const handleFindSimilar = useCallback((mediaId: string) => {
         setActiveSearchMediaId(mediaId);
@@ -134,6 +141,30 @@ export default function App() {
 
     return (
         <div className="flex h-screen w-full bg-gray-50 font-sans text-gray-800 overflow-hidden">
+            {/* Mobile header bar */}
+            <div className="fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 md:hidden">
+                <button
+                    onClick={() => setSidebarOpen(true)}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                    aria-label="Open menu"
+                >
+                    <svg className="w-6 h-6 text-gray-700" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                    </svg>
+                </button>
+                <h1 className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
+                    GalleryNet
+                </h1>
+            </div>
+
+            {/* Sidebar backdrop (mobile only) */}
+            {sidebarOpen && (
+                <div
+                    className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+                    onClick={() => setSidebarOpen(false)}
+                />
+            )}
+
             <Sidebar
                 activeTab={activeTab}
                 onTabChange={handleTabChange}
@@ -141,12 +172,14 @@ export default function App() {
                 onLogout={authRequired ? handleLogout : undefined}
                 folders={folders}
                 activeFolder={activeFolder}
-                onSelectFolder={handleSelectFolder}
+                onSelectFolder={handleSelectFolderWrapped}
                 onFoldersChanged={fetchFolders}
                 disabled={isBusy}
+                mobileOpen={sidebarOpen}
+                onMobileClose={() => setSidebarOpen(false)}
             />
 
-            <main className="flex-1 h-full overflow-y-auto p-8">
+            <main className="flex-1 h-full overflow-y-auto p-4 pt-16 md:p-8 md:pt-8">
                 <div className={activeTab === 'gallery' ? '' : 'hidden'}>
                     <GalleryView
                         filter={mediaFilter}

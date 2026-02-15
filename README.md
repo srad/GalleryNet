@@ -9,11 +9,23 @@
 </p>
 
 <p align="center">
+  <a href="https://teamcity.sedrad.com/viewType.html?buildTypeId=GalleryNet_Build&guest=1">
+    <img src="https://teamcity.sedrad.com/app/rest/builds/buildType:(id:GalleryNet_Build)/statusIcon" alt="Build Status">
+  </a>
+
   <img src="https://img.shields.io/badge/rust-2021-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust">
+
   <img src="https://img.shields.io/badge/react-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React">
+
   <img src="https://img.shields.io/badge/ONNX_Runtime-MobileNetV3-green?style=flat-square" alt="ONNX Runtime">
-  <img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
-  <a href="https://github.com/srad/GalleryNet/stargazers"><img src="https://img.shields.io/github/stars/srad/GalleryNet?style=flat-square" alt="Stars"></a>
+
+  <a href="https://hub.docker.com/r/sedrad/gallerynet/tags">
+    <img src="https://img.shields.io/docker/image-size/sedrad/gallerynet/v1?style=flat-square&logo=docker&logoColor=white&label=docker%20image%20size" alt="Docker Size">
+  </a>
+
+  <a href="https://github.com/srad/GalleryNet/stargazers">
+    <img src="https://img.shields.io/github/stars/srad/GalleryNet?style=flat-square" alt="Stars">
+  </a>
 </p>
 
 <p align="center">
@@ -32,8 +44,9 @@
 
 ## Highlights
 
-- **AI Visual Search** &mdash; Find similar images using MobileNetV3 embeddings and cosine similarity via [sqlite-vec](https://github.com/asg017/sqlite-vec)
+- **AI Visual Search** &mdash; Find similar images and videos using MobileNetV3 embeddings and cosine similarity via [sqlite-vec](https://github.com/asg017/sqlite-vec)
 - **Duplicate Detection** &mdash; Perceptual hashing automatically prevents uploading the same image or video twice
+- **Item Grouping** &mdash; Grouping of similar images and videos with gradual similarity slider
 - **Video Support** &mdash; Full video upload with intelligent frame extraction via ffmpeg for thumbnails, hashing, and feature vectors
 - **Virtual Folders** &mdash; Organize media into folders without moving files. Many-to-many: one photo can live in multiple folders
 - **Batch Operations** &mdash; Multi-select with marquee (rubber-band) selection, batch download as zip, batch delete, batch add-to-folder

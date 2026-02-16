@@ -261,11 +261,15 @@ impl SqliteRepository {
                 sql.push_str(" AND f.media_id IS NOT NULL");
             }
 
-            // Tag filtering: media must have ALL specified tags
+            // Tag filtering: media must have ANY of the specified tags (OR)
             if let Some(ref tag_list) = tags {
                 if !tag_list.is_empty() {
+                    let placeholders: Vec<String> = tag_list.iter().map(|_| "?".to_string()).collect();
+                    sql.push_str(&format!(
+                        " AND EXISTS (SELECT 1 FROM media_tags mt2 JOIN tags t2 ON t2.id = mt2.tag_id WHERE mt2.media_id = m.id AND t2.name IN ({}))",
+                        placeholders.join(", ")
+                    ));
                     for tag in tag_list {
-                        sql.push_str(" AND EXISTS (SELECT 1 FROM media_tags mt2 JOIN tags t2 ON t2.id = mt2.tag_id WHERE mt2.media_id = m.id AND t2.name = ?)");
                         params_vec.push(Box::new(tag.clone()));
                     }
                 }

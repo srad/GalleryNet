@@ -528,7 +528,11 @@ async fn learn_tag_handler(
     State(state): State<AppState>,
     Json(body): Json<LearnTagRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
-    let count = state.tag_learning_use_case.learn_tag(&body.tag_name)?;
+    let use_case = state.tag_learning_use_case.clone();
+    let tag_name = body.tag_name.clone();
+    let count = tokio::task::spawn_blocking(move || use_case.learn_tag(&tag_name))
+        .await
+        .map_err(|e| DomainError::Ai(e.to_string()))??;
     Ok(Json(json!({ "auto_tagged_count": count })))
 }
 
@@ -542,8 +546,12 @@ async fn auto_tag_handler(
     State(state): State<AppState>,
     Json(body): Json<AutoTagRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
-    let result = state.tag_learning_use_case.run_auto_tagging(body.folder_id)?;
-    Ok(Json(json!({ 
+    let use_case = state.tag_learning_use_case.clone();
+    let folder_id = body.folder_id;
+    let result = tokio::task::spawn_blocking(move || use_case.run_auto_tagging(folder_id))
+        .await
+        .map_err(|e| DomainError::Ai(e.to_string()))??;
+    Ok(Json(json!({
         "before": result.before,
         "after": result.after,
         "models_processed": result.models_processed
@@ -560,7 +568,11 @@ async fn apply_tag_handler(
     Path(id): Path<i64>,
     Json(body): Json<ApplyTagRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
-    let count = state.tag_learning_use_case.apply_tag_model(id, body.folder_id)?;
+    let use_case = state.tag_learning_use_case.clone();
+    let folder_id = body.folder_id;
+    let count = tokio::task::spawn_blocking(move || use_case.apply_tag_model(id, folder_id))
+        .await
+        .map_err(|e| DomainError::Ai(e.to_string()))??;
     Ok(Json(json!({ "auto_tagged_count": count })))
 }
 

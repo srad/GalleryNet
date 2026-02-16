@@ -9,7 +9,7 @@ Hexagonal architecture with four layers:
 ```
 src/
 ├── domain/          # Models, trait ports, error types (no dependencies)
-│   ├── models.rs    # MediaItem, MediaSummary, MediaCounts, Folder
+│   ├── models.rs    # MediaItem, MediaSummary, MediaCounts, Folder, TrainedTagModel
 │   └── ports.rs     # MediaRepository, AiProcessor, HashGenerator traits + DomainError
 ├── application/     # Use cases (orchestration logic)
 │   ├── upload.rs    # UploadMediaUseCase — phash check, EXIF, thumbnail, feature extraction, save
@@ -17,14 +17,14 @@ src/
 │   ├── list.rs      # ListMediaUseCase — paginated media listing with optional media_type filter and sort
 │   ├── delete.rs    # DeleteMediaUseCase — single and batch delete (DB + files)
 │   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison
-│   └── tag_learning.rs # TagLearningUseCase — SVM-based iterative learning and auto-tagging
+│   └── tag_learning.rs # TagLearningUseCase — Linear SVM with class-weighted training (pos_neg_weights), Platt-calibrated probabilities, hard negative mining, outlier filtering
 ├── infrastructure/  # Trait implementations (adapters)
 │   ├── sqlite_repo/       # SQLite + sqlite-vec (connection pool, split into submodules)
 │   │   ├── mod.rs         # Pool struct, schema init, trait impl delegation, tag helpers
 │   │   ├── media.rs       # CRUD: save, find, delete, list, counts, favorites
 │   │   ├── folders.rs     # Folder operations: create, list, delete, rename, reorder, media membership
-│   │   ├── tags.rs        # Tag operations: get_all, update single, update batch
-│   │   └── embeddings.rs  # Vector embedding retrieval for similarity grouping
+│   │   ├── tags.rs        # Tag operations: CRUD, auto-tag management, tag model persistence (Platt coefficients)
+│   │   └── embeddings.rs  # Vector embedding retrieval: all embeddings, random sampling, KNN nearest neighbors
 │   ├── ort_processor.rs   # MobileNetV3 ONNX inference via ort crate (session pool)
 │   └── phash_generator.rs # Perceptual hashing for duplicate detection
 ├── presentation/    # HTTP layer
@@ -146,9 +146,22 @@ CREATE TABLE tags (
 CREATE TABLE media_tags (
     media_id BLOB NOT NULL REFERENCES media(id) ON DELETE CASCADE,
     tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    is_auto INTEGER NOT NULL DEFAULT 0,   -- 0=manual, 1=auto-tagged by SVM
+    confidence REAL,                       -- Platt-calibrated probability (auto-tags only)
     PRIMARY KEY (media_id, tag_id)
 );
 CREATE INDEX idx_media_tags_tag_id ON media_tags(tag_id);
+
+-- Trained SVM tag models
+CREATE TABLE tag_models (
+    tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
+    weights BLOB NOT NULL,                 -- f64 weight vector (dim * 8 bytes)
+    bias REAL NOT NULL,                    -- SVM decision boundary offset (rho)
+    platt_a REAL NOT NULL DEFAULT -2.0,    -- Platt scaling coefficient A
+    platt_b REAL NOT NULL DEFAULT 0.0,     -- Platt scaling coefficient B
+    trained_at_count INTEGER NOT NULL DEFAULT 0,  -- manual positive count at training time
+    version INTEGER NOT NULL DEFAULT 1
+);
 ```
 
 Auto-migration: on startup, if the `media_type` column is missing (pre-existing DB), the app runs `ALTER TABLE` to add it and backfills existing rows by checking file extension.
@@ -192,7 +205,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `POST /api/media/group` — Group media by similarity. JSON body `{"folder_id": "...", "similarity": 80}`. Returns array of `MediaGroup` (groups of items).
 - `GET /api/tags` — List all unique tags.
 - `GET /api/tags/count?folder_id=...` — Count auto-tags in current view.
-- `POST /api/tags/learn` — Learn from manual tags. JSON body `{"tag_name":"...", "positive_ids": [...]}`.
+- `POST /api/tags/learn` — Learn from manual tags. JSON body `{"tag_name":"..."}`. Trains a linear SVM on all manual positives for the tag, computes Platt calibration, and auto-tags the entire library.
 - `POST /api/tags/{id}/apply` — Apply learned tag model. Body `{"folder_id": "..."}`.
 - `GET /api/media?page=1&limit=20&media_type=image&sort=desc&tags=a,b` — Paginated media list. Optional `media_type` filter (`image` or `video`). Optional `sort` param (`asc` or `desc`, default `desc`). Optional `favorite=true`. Optional `tags` (comma-separated, AND filter). Sorted by `original_date`. Returns array of `MediaSummary`.
 - `GET /api/media/{id}` — Get full `MediaItem` by UUID, including `exif_json`. Returns 404 if not found.
@@ -237,7 +250,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 
 ## Dependencies
 
-Key crates: `axum` (HTTP), `ort` (ONNX Runtime), `rusqlite` + `sqlite-vec` (DB + vectors), `image` (processing), `image_hasher` (phash), `ndarray` (tensors), `kamadak-exif` (EXIF parsing), `libc` (disk space on Linux), `zip` (batch download archive), `mime_guess` (content-type detection for downloads).
+Key crates: `axum` (HTTP), `ort` (ONNX Runtime), `rusqlite` + `sqlite-vec` (DB + vectors), `image` (processing), `image_hasher` (phash), `ndarray` (tensors), `linfa` + `linfa-svm` (SVM training & Platt scaling), `kamadak-exif` (EXIF parsing), `libc` (disk space on Linux), `zip` (batch download archive), `mime_guess` (content-type detection for downloads).
 
 External: `ffmpeg` (video frame extraction).
 

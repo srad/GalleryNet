@@ -1098,7 +1098,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
     return (
         <div ref={scrollContainerRef} className="max-w-7xl mx-auto px-4 md:px-8 pb-12">
-            <div className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur-md -mx-4 px-4 py-4 md:-mx-8 md:px-8 mb-4 md:mb-6 border-b border-gray-200/50 shadow-sm transition-colors duration-200 flex flex-col gap-3" id="gallery-toolbar">
+            <div className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur-md -mx-4 px-4 py-4 md:-mx-8 md:px-8 mb-4 md:mb-6 border-b border-gray-200/50 shadow-sm transition-colors duration-200 flex flex-col gap-4" id="gallery-toolbar">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 min-w-0">
                         {folderId && onBackToGallery && (
@@ -1181,32 +1181,6 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         </button>
                     )}
 
-                    {/* Auto-tag button */}
-                    {!isPicker && (
-                        <button
-                            onClick={handleAutoTag}
-                            disabled={isBusy}
-                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors border disabled:opacity-50 disabled:pointer-events-none ${
-                                isAutoTagging
-                                    ? 'bg-indigo-50 text-indigo-600 border-indigo-200'
-                                    : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
-                            }`}
-                            title="Auto-tag current view using learned models"
-                        >
-                            {isAutoTagging ? (
-                                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                                </svg>
-                            ) : (
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                                </svg>
-                            )}
-                            <span className="hidden sm:inline">{isAutoTagging ? 'Tagging...' : 'Auto Tag'}</span>
-                        </button>
-                    )}
-
                     <button
                         onClick={() => setSortOrder(s => {
                             const next = s === 'desc' ? 'asc' : 'desc';
@@ -1226,6 +1200,32 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         </svg>
                         <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
                     </button>
+
+                    {/* Auto-tag button */}
+                    {!isPicker && (
+                      <button
+                        onClick={handleAutoTag}
+                        disabled={isBusy}
+                        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors border disabled:opacity-50 disabled:pointer-events-none ${
+                          isAutoTagging
+                            ? 'bg-indigo-50 text-indigo-600 border-indigo-200'
+                            : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
+                        }`}
+                        title="Auto-tag current view using learned models"
+                      >
+                          {isAutoTagging ? (
+                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                            </svg>
+                          )}
+                          <span className="hidden sm:inline">{isAutoTagging ? 'Tagging...' : 'Auto Tag'}</span>
+                      </button>
+                    )}
 
                     <TagFilter selectedTags={filterTags} onChange={setFilterTags} refreshKey={refreshKey} />
                     <button
@@ -1383,7 +1383,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 </div>
             )}
 
-            {/* Empty state — only after initial load finishes with 0 results */}
+            {/* Empty state — only after the initial load finishes with 0 results */}
             {!initialLoad && !isGrouped && media.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
                     <PhotoIcon />

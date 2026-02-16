@@ -86,13 +86,13 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
                         key={tag.name} 
                         className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md border ${
                             tag.is_auto 
-                            ? 'text-indigo-700 bg-indigo-50 border-indigo-100' 
+                            ? 'text-indigo-800 bg-indigo-50 border-indigo-50' 
                             : 'text-blue-700 bg-blue-50 border-blue-100'
                         }`}
                         title={tag.is_auto ? `Automatically assigned (confidence: ${Math.round((tag.confidence || 0) * 100)}%)` : undefined}
                     >
                         {tag.is_auto && (
-                            <svg className="w-3 h-3 text-indigo-400" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                            <svg className="w-3 h-3 text-indigo-800" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
                             </svg>
                         )}

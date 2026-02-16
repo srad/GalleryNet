@@ -5,7 +5,7 @@
 <h1 align="center">GalleryNet</h1>
 
 <p align="center">
-  <strong>Self-hosted media gallery with AI-powered visual similarity search, grouping, tagging</strong>
+  <strong>Self-hosted photo and video gallery with AI-powered search, grouping, and tagging</strong>
 </p>
 
 <p align="center">
@@ -29,89 +29,44 @@
 </p>
 
 <p align="center">
-  Upload photos and videos, organize them into folders, find visually similar images with AI &mdash; all running on your own hardware. No cloud, no API keys, fully private.
+  Upload photos and videos, organize them into folders, and find visually similar images using AI &mdash; all running on your own hardware. No cloud, no API keys, fully private.
 </p>
 
 ---
 
 <p align="center">
-  <img alt="GalleryNet Screenshot" width="900" alt="screenshot_1" src="https://github.com/user-attachments/assets/72613ee9-ab24-4d23-94f3-9b13a6fa4836" />
+  <img alt="GalleryNet Screenshot" width="900" src="https://github.com/user-attachments/assets/72613ee9-ab24-4d23-94f3-9b13a6fa4836" />
 </p>
 
 ---
 
-## Highlights
-
-- **AI Visual Search** &mdash; Find similar images and videos using MobileNetV3 embeddings and cosine similarity via [sqlite-vec](https://github.com/asg017/sqlite-vec)
-- **Duplicate Detection** &mdash; Perceptual hashing automatically prevents uploading the same image or video twice
-- **Item Grouping** &mdash; Grouping of similar images and videos with gradual similarity slider
-- **AI-Powered Tagging** &mdash; Tag 3+ examples and let a linear SVM with Platt-calibrated probabilities auto-tag your entire library.
-- **Favorites** &mdash; Mark items as favorites to quickly access your best shots in a dedicated view
-- **Video Support** &mdash; Full video upload with intelligent frame extraction via ffmpeg for thumbnails, hashing, and feature vectors
-- **Virtual Folders** &mdash; Organize media into folders without moving files. Many-to-many: one photo can live in multiple folders. Supports **drag-and-drop** of media items directly into folders.
-- **Deep Linking** &mdash; Direct URLs for folders, favorites, and individual media items. Modals and search states are bookmarkable.
-- **Batch Operations** &mdash; Multi-select with marquee (rubber-band) selection, keyboard shortcuts (`Ctrl+A`, `Delete`), batch download as zip, batch delete, batch add-to-folder
-
-- **EXIF Metadata** &mdash; View camera details, date taken, GPS, exposure, and more in the detail modal
-- **Password Protection** &mdash; Optional authentication via a single environment variable, with rate-limited login, secure cookies, and session invalidation on logout
-- **100% Self-Hosted** &mdash; Everything runs on your machine. No cloud. No telemetry. Your data stays yours.
-
 ## Features
 
-### Gallery
-- Fully responsive layout &mdash; works on smartphones, tablets, and desktops
-- Route-based navigation &mdash; supports browser history, back/forward buttons, and deep links
-- Infinite-scroll grid with lazy-loaded thumbnails
-- **Keyboard Shortcuts** &mdash; Select all (`Ctrl+A`), delete (`Del`), navigation (`Arrows`, `Esc`)
-- Filter by media type (All / Photos / Videos)
+- **Visual Search** &mdash; Find similar photos and videos by uploading a reference image, with adjustable similarity threshold and one-click grouping
+- **Auto Tagging** &mdash; Tag a few examples and let the AI automatically label matching items across your library
+- **Duplicate Detection** &mdash; Duplicates are detected during upload and silently skipped
+- **Virtual Folders** &mdash; Organize media into folders without moving files; one item can live in multiple folders with drag-and-drop support
+- **Favorites** &mdash; Mark items as favorites for quick access in a dedicated view
+- **Multi-Select & Batch Operations** &mdash; Marquee selection, shift-click, batch download (auto-split zip), batch delete, and batch add-to-folder
+- **Video Support** &mdash; Upload any common video format with automatic frame extraction for thumbnails and AI features
+- **EXIF Metadata** &mdash; View camera details, date, GPS, exposure, and more
+- **Deep Linking** &mdash; Bookmarkable URLs for folders, favorites, search states, and individual items
+- **Password Protection** &mdash; Optional single-password auth with rate limiting and secure sessions
+- **Responsive UI** &mdash; Infinite-scroll grid, keyboard shortcuts, touch swipe, and full mobile support
+- **100% Self-Hosted** &mdash; No cloud, no telemetry. Your data stays yours.
 
-- Sort by date (Newest / Oldest) based on EXIF original date
-- Full-size media viewer with EXIF detail panel, keyboard navigation, and touch swipe
-- Deep-linked modals &mdash; share links directly to specific media items via `?media=<id>`
+### How It Works
 
-### Favorites
-- Mark any photo or video as a favorite with a single click
-- Dedicated "Favorites" tab in the sidebar
-- Filter by favorites within virtual folders to see best-of collections
-
-### AI-Powered Visual Search
-- Upload a reference image and find visually similar photos in your library
-- Adjustable similarity threshold (0&ndash;100%)
-- **Group by Similarity** &mdash; Automatically cluster your entire gallery into visually similar groups with a single click
-- **Active Learning Tags** &mdash; Tag 3+ items with the same name and click "Auto Tag" to train an AI model that automatically labels matching items in your gallery or folder.
-- Powered by MobileNetV3-Large with 1280-dimensional feature vectors
-
-- Vector similarity search using cosine distance in sqlite-vec
-
-### Smart Upload
-- Drag-and-drop or file picker with multi-file support
-- Concurrent upload queue (3 simultaneous uploads)
-- Per-file progress tracking with overall progress in the sidebar
-- Automatic duplicate detection &mdash; duplicates are skipped, not rejected as errors
-- EXIF date extraction with filename pattern fallback
-
-### Virtual Folders
-- Create folders to organize your media
-- **Drag-and-drop** items directly into folders from the gallery, search results, or detail modal
-- Add selected items to any folder from the gallery toolbar
-- Each folder has its own gallery view with filtering and sorting
-- Upload directly into a folder &mdash; media is added to the gallery and the folder
-- Remove items from folders without deleting the actual files
-
-### Multi-Select & Batch Operations
-- Click "Select" or drag a marquee rectangle to select multiple items
-- **Keyboard support** &mdash; `Ctrl+A` to select all, `Delete` to batch delete or remove from folder
-- Shift-click for range selection, Ctrl/Cmd+drag for additive selection
-
-- Batch download as a single file or zip archive (large downloads auto-split into ~2GB parts)
-- Batch delete with confirmation
-- Add selection to any folder via dropdown picker
-
-### Video Handling
-- Upload any video format supported by ffmpeg
-- Intelligent frame extraction using ffmpeg's `thumbnail` filter (picks visually distinct frames)
-- Thumbnail and AI features generated from representative frames
-- Play badge overlay on video cards in the gallery
+| Feature | Technology |
+|---------|-----------|
+| Visual Search | MobileNetV3-Large extracts 1280-dim feature vectors; cosine similarity via [sqlite-vec](https://github.com/asg017/sqlite-vec) |
+| Similarity Grouping | Agglomerative clustering over the same embedding space with a user-adjustable distance threshold |
+| Auto-Tagging | Linear SVM with Platt-calibrated probabilities trained on user-provided examples via [linfa-svm](https://crates.io/crates/linfa-svm) |
+| Duplicate Detection | Perceptual hashing ([image_hasher](https://crates.io/crates/image_hasher)) compared at upload time |
+| Video Processing | ffmpeg `thumbnail` filter selects visually distinct frames for thumbnails, hashing, and embeddings |
+| AI Inference | [ort](https://github.com/pykeio/ort) (ONNX Runtime) for fast CPU-based model execution |
+| Batch Downloads | Real-time ZIP streaming via [async_zip](https://crates.io/crates/async_zip) with automatic partitioning into ~2 GB parts |
+| Authentication | Argon2-hashed password, rate-limited login, secure HTTP-only cookies |
 
 ## Quick Start with Docker
 
@@ -251,7 +206,6 @@ src/
 | `GET` | `/api/media/download/stream/{id}` | Stream a specific download part incrementally |
 | `POST` | `/api/media/download` | Simple batch download (if under 2GB). Body: `["uuid1", ...]` |
 | `GET` | `/api/tags` | List all unique tags |
-
 | `GET` | `/api/tags/count` | Count auto-tags in current view |
 | `POST` | `/api/tags/learn` | Train model from manual tags. Body: `{"tag_name": "..."}` |
 | `POST` | `/api/tags/auto-tag` | Apply all trained models to current scope |
@@ -262,7 +216,6 @@ src/
 | `POST` | `/api/folders/{id}/media` | Add media to folder. Body: `["uuid1", ...]` |
 | `POST` | `/api/folders/{id}/media/remove` | Remove media from folder |
 | `GET` | `/api/folders/{id}/download` | Get download plan for folder (auto-splits for large folders) |
-
 | `GET` | `/api/stats` | Server statistics (counts, storage, disk space) |
 | `POST` | `/api/login` | Authenticate. Body: `{"password": "..."}` |
 | `POST` | `/api/logout` | Clear session |

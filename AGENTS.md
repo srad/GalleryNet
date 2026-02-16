@@ -16,7 +16,7 @@ src/
 │   ├── search.rs    # SearchSimilarUseCase — extract query features, find similar via DB
 │   ├── list.rs      # ListMediaUseCase — paginated media listing with optional media_type filter and sort
 │   ├── delete.rs    # DeleteMediaUseCase — single and batch delete (DB + files)
-│   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison
+│   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison (capped at 10k items, 5M edges)
 │   └── tag_learning.rs # TagLearningUseCase — Linear SVM with class-weighted training (pos_neg_weights), Platt-calibrated probabilities, hard negative mining, outlier filtering
 ├── infrastructure/  # Trait implementations (adapters)
 │   ├── sqlite_repo/       # SQLite + sqlite-vec (connection pool, split into submodules)
@@ -28,8 +28,8 @@ src/
 │   ├── ort_processor.rs   # MobileNetV3 ONNX inference via ort crate (session pool)
 │   └── phash_generator.rs # Perceptual hashing for duplicate detection
 ├── presentation/    # HTTP layer
-│   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, batch-download, stats, login/logout, folders
-│   └── auth.rs      # Authentication middleware, AuthConfig, HMAC token generation/verification
+│   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, batch-download, stats, login/logout, folders. Rate limiting, filename sanitization, error message sanitization, size-based zip splitting.
+│   └── auth.rs      # Authentication middleware, AuthConfig, HMAC token generation/verification, constant-time password comparison, session generation counter for invalidation
 └── main.rs          # Wiring, config, server startup
 
 frontend/src/
@@ -185,6 +185,7 @@ cargo run
 #   UPLOAD_DIR=uploads
 #   THUMBNAIL_DIR=thumbnails
 #   GALLERY_PASSWORD=         # Set to enable password authentication (empty = no auth)
+#   CORS_ORIGIN=              # Set to allow cross-origin requests from a specific origin (e.g. https://example.com). Unset = deny cross-origin.
 
 # Frontend
 cd frontend && npm install && npm run build
@@ -198,10 +199,10 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 
 ## API Endpoints
 
-- `POST /api/login` — JSON body `{"password":"..."}`. Returns 200 with `Set-Cookie: gallery_session=<token>` on success, 401 on wrong password. No-op (always 200) if auth not configured.
-- `POST /api/logout` — Clears the session cookie. Always returns 200.
+- `POST /api/login` — JSON body `{"password":"..."}`. Returns 200 with `Set-Cookie: gallery_session=<token>` (HttpOnly, Secure, SameSite=Strict) on success, 401 on wrong password, 429 after 10 attempts per 5-minute window per IP. Constant-time password comparison. No-op (always 200) if auth not configured.
+- `POST /api/logout` — Clears the session cookie and invalidates all existing sessions (bumps generation counter). Always returns 200.
 - `GET /api/auth-check` — Returns `{"authenticated": true/false, "required": true/false}`. Used by frontend on load to decide whether to show login screen.
-- `POST /api/upload` — Multipart file upload (single or multiple files). Single file returns `MediaItem` JSON. Multiple files returns array of `{media, error, filename}` results. Streams to temp file to avoid memory buffering. HTTP 409 for duplicates.
+- `POST /api/upload` — Multipart file upload (single or multiple files, max 1000 per request). Only allowed extensions (jpg, jpeg, png, gif, webp, bmp, tiff, tif, heic, heif, avif, mp4, mov, avi, mkv, webm). Single file returns `MediaItem` JSON. Multiple files returns array of `{media, error, filename}` results. Streams to temp file to avoid memory buffering. Image decode limits (10k×10k px, 400MB alloc) prevent pixel bombs. HTTP 409 for duplicates.
 - `POST /api/search` — Multipart with `file` (image) and `similarity` (0-100). Returns array of `MediaItem`.
 - `POST /api/media/group` — Group media by similarity. JSON body `{"folder_id": "...", "similarity": 80}`. Returns array of `MediaGroup` (groups of items).
 - `GET /api/tags` — List all unique tags.
@@ -214,7 +215,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `GET /api/stats` — Server statistics: `{version, total_files, total_images, total_videos, total_size_bytes, disk_free_bytes, disk_total_bytes}`.
 - `DELETE /api/media/{id}` — Delete single media item. Returns 204 or 404.
 - `POST /api/media/batch-delete` — JSON body `["uuid1", "uuid2", ...]`. Returns `{"deleted": N}`. Deletes DB rows, embeddings, originals, and thumbnails.
-- `POST /api/media/download` — JSON body `["uuid1", "uuid2", ...]`. Single file returns the file directly with appropriate Content-Type. Multiple files returns a zip archive (`application/zip`). Filenames in zip are deduplicated with `_N` suffix.
+- `POST /api/media/download` — JSON body `["uuid1", "uuid2", ...]`. IDs are deduplicated. Single file returns the file directly with appropriate Content-Type. Multiple files returns a zip archive (`application/zip`). Large downloads (>2GB uncompressed) are automatically split into roughly equal-sized zip parts wrapped in an outer zip. Filenames are sanitized and deduplicated with `_N` suffix.
 - `GET /api/folders` — List all folders with item counts, ordered by `sort_order`. Returns array of `{id, name, created_at, item_count, sort_order}`.
 - `POST /api/folders` — Create folder. JSON body `{"name":"..."}`. Returns created folder. New folders get `sort_order = max + 1`.
 - `PUT /api/folders/reorder` — Reorder folders. JSON body `["folder_uuid1", "folder_uuid2", ...]` (ordered array of folder IDs). Sets `sort_order` to array index. Returns 204.
@@ -222,8 +223,8 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `GET /api/folders/{id}/media?page=&limit=&media_type=&sort=` — Paginated media list within a folder. Same params as `/api/media`.
 - `POST /api/folders/{id}/media` — Add media to folder. JSON body `["uuid1","uuid2"]`. Uses `INSERT OR IGNORE` for idempotency.
 - `POST /api/folders/{id}/media/remove` — Remove media from folder. JSON body `{"media_ids":["uuid1"]}`.
-- `GET /api/folders/{id}/download` — Download all media in folder as zip.
-- `/uploads/*` and `/thumbnails/*` — Static file serving.
+- `GET /api/folders/{id}/download` — Download all media in folder as zip. Large folders auto-split into multiple zip parts.
+- `/uploads/*` and `/thumbnails/*` — Static file serving with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` headers.
 
 ## Frontend Architecture
 

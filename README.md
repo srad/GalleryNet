@@ -53,7 +53,7 @@
 - **Batch Operations** &mdash; Multi-select with marquee (rubber-band) selection, keyboard shortcuts (`Ctrl+A`, `Delete`), batch download as zip, batch delete, batch add-to-folder
 
 - **EXIF Metadata** &mdash; View camera details, date taken, GPS, exposure, and more in the detail modal
-- **Password Protection** &mdash; Optional authentication via a single environment variable
+- **Password Protection** &mdash; Optional authentication via a single environment variable, with rate-limited login, secure cookies, and session invalidation on logout
 - **100% Self-Hosted** &mdash; Everything runs on your machine. No cloud. No telemetry. Your data stays yours.
 
 ## Features
@@ -103,7 +103,7 @@
 - **Keyboard support** &mdash; `Ctrl+A` to select all, `Delete` to batch delete or remove from folder
 - Shift-click for range selection, Ctrl/Cmd+drag for additive selection
 
-- Batch download as a single file or zip archive with streaming progress
+- Batch download as a single file or zip archive (large downloads auto-split into ~2GB parts)
 - Batch delete with confirmation
 - Add selection to any folder via dropdown picker
 
@@ -176,6 +176,7 @@ docker compose up -d
 | `THUMBNAIL_DIR` | `thumbnails` | Directory for generated thumbnails |
 | `MODEL_PATH` | `assets/models/mobilenetv3.onnx` | Path to the ONNX model file |
 | `GALLERY_PASSWORD` | *(empty)* | Set to enable password authentication. Leave empty for no auth |
+| `CORS_ORIGIN` | *(empty)* | Set to allow cross-origin requests from a specific origin (e.g. `https://example.com`). Unset = same-origin only |
 
 ## Build from Source
 
@@ -246,7 +247,7 @@ src/
 | `POST` | `/api/media/{id}/favorite` | Toggle favorite status. Body: `{"favorite": true/false}` |
 | `DELETE` | `/api/media/{id}` | Delete single media item |
 | `POST` | `/api/media/batch-delete` | Batch delete. Body: `["uuid1", ...]` |
-| `POST` | `/api/media/download` | Batch download as zip. Body: `["uuid1", ...]` |
+| `POST` | `/api/media/download` | Batch download as zip (auto-splits into parts for large sets). Body: `["uuid1", ...]` |
 | `GET` | `/api/tags` | List all unique tags |
 | `GET` | `/api/tags/count` | Count auto-tags in current view |
 | `POST` | `/api/tags/learn` | Train model from manual tags. Body: `{"tag_name": "..."}` |
@@ -257,7 +258,7 @@ src/
 | `GET` | `/api/folders/{id}/media` | Paginated media in folder |
 | `POST` | `/api/folders/{id}/media` | Add media to folder. Body: `["uuid1", ...]` |
 | `POST` | `/api/folders/{id}/media/remove` | Remove media from folder |
-| `GET` | `/api/folders/{id}/download` | Download all media in folder as zip |
+| `GET` | `/api/folders/{id}/download` | Download all media in folder as zip (auto-splits for large folders) |
 | `GET` | `/api/stats` | Server statistics (counts, storage, disk space) |
 | `POST` | `/api/login` | Authenticate. Body: `{"password": "..."}` |
 | `POST` | `/api/logout` | Clear session |

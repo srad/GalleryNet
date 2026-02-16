@@ -1,7 +1,14 @@
 use crate::domain::{DomainError, MediaGroup, MediaRepository, MediaSummary};
 use rayon::prelude::*;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use uuid::Uuid;
+
+/// Maximum number of items that can be grouped at once.
+const MAX_GROUPABLE_ITEMS: usize = 10_000;
+
+/// Maximum number of edges (similar pairs) before aborting to prevent OOM.
+const MAX_EDGES: usize = 5_000_000;
 
 /// Disjoint-set (Union-Find) with path compression and union by rank.
 struct UnionFind {
@@ -74,6 +81,15 @@ impl GroupMediaUseCase {
         }
 
         let n = items.len();
+
+        // Cap item count to prevent O(N^2) blowup
+        if n > MAX_GROUPABLE_ITEMS {
+            return Err(DomainError::Io(format!(
+                "Too many items to group: {} (max {})",
+                n, MAX_GROUPABLE_ITEMS
+            )));
+        }
+
         let dim = items[0].1.len();
 
         // 2. Pack all vectors into a contiguous flat buffer for cache-friendly access.
@@ -90,36 +106,49 @@ impl GroupMediaUseCase {
             summaries.push(summary);
         }
 
-        // 3. Parallel pairwise comparison.
+        // 3. Parallel pairwise comparison with edge count cap.
         //    With pre-normalized vectors: cosine_distance = 1.0 - dot(a, b).
         //    We need edges where dot(a, b) >= min_dot.
-        //
-        //    Each row i is processed in parallel. For each i, we scan j > i and
-        //    collect matching (i, j) pairs into a thread-local vec. Rayon merges
-        //    all per-row edge lists at the end.
         let min_dot = 1.0 - threshold;
+
+        let edge_count = Arc::new(AtomicUsize::new(0));
+        let exceeded = Arc::new(AtomicBool::new(false));
 
         let edges: Vec<(usize, usize)> = (0..n)
             .into_par_iter()
             .flat_map_iter(|i| {
-                if !valid[i] {
+                if !valid[i] || exceeded.load(Ordering::Relaxed) {
                     return Vec::new();
                 }
                 let vec_i = &matrix[i * dim..(i + 1) * dim];
                 let mut local_edges = Vec::new();
 
                 for j in (i + 1)..n {
+                    if exceeded.load(Ordering::Relaxed) {
+                        break;
+                    }
                     if !valid[j] {
                         continue;
                     }
                     let vec_j = &matrix[j * dim..(j + 1) * dim];
                     if dot(vec_i, vec_j) >= min_dot {
                         local_edges.push((i, j));
+                        if edge_count.fetch_add(1, Ordering::Relaxed) + 1 > MAX_EDGES {
+                            exceeded.store(true, Ordering::Relaxed);
+                            break;
+                        }
                     }
                 }
                 local_edges
             })
             .collect();
+
+        if exceeded.load(Ordering::Relaxed) {
+            return Err(DomainError::Io(format!(
+                "Too many similar pairs (>{}) — try a higher similarity threshold",
+                MAX_EDGES
+            )));
+        }
 
         // 4. Union-Find merging (sequential — trivially fast on the edge list).
         let mut uf = UnionFind::new(n);
@@ -159,5 +188,46 @@ impl GroupMediaUseCase {
         }
 
         Ok(groups)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn union_find_basic() {
+        let mut uf = UnionFind::new(5);
+        uf.union(0, 1);
+        uf.union(2, 3);
+        assert_eq!(uf.find(0), uf.find(1));
+        assert_ne!(uf.find(0), uf.find(2));
+        uf.union(1, 3);
+        assert_eq!(uf.find(0), uf.find(3));
+        // 4 is still isolated
+        assert_ne!(uf.find(0), uf.find(4));
+    }
+
+    #[test]
+    fn dot_product_correct() {
+        let a = [1.0, 2.0, 3.0];
+        let b = [4.0, 5.0, 6.0];
+        let result = dot(&a, &b);
+        assert!((result - 32.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dot_product_zero() {
+        let a = [1.0, 0.0, 0.0];
+        let b = [0.0, 1.0, 0.0];
+        assert!((dot(&a, &b) - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn constants_are_valid() {
+        assert!(MAX_GROUPABLE_ITEMS > 0);
+        assert!(MAX_GROUPABLE_ITEMS <= 100_000);
+        assert!(MAX_EDGES > 0);
+        assert!(MAX_EDGES <= 50_000_000);
     }
 }

@@ -3,6 +3,8 @@ mod application;
 mod infrastructure;
 mod presentation;
 
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::path::PathBuf;
 use tokio::net::TcpListener;
@@ -12,12 +14,11 @@ use infrastructure::{SqliteRepository, OrtProcessor, PhashGenerator};
 use application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, TagLearningUseCase};
 use presentation::{AppState, AuthConfig, app_router};
 
-// UPDATED: Added ServeFile
 use tower_http::services::{ServeDir, ServeFile};
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{CorsLayer, AllowOrigin};
 use axum::extract::DefaultBodyLimit;
-// UPDATED: Added Router
 use axum::Router;
+use axum::http::{HeaderValue, Method};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -122,10 +123,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repo: repo.clone(),
         upload_dir: upload_dir.clone(),
         auth_config: auth_config.clone(),
-        upload_semaphore: Arc::new(tokio::sync::Semaphore::new(2)), // Limit concurrent heavy uploads to 2
+        upload_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
+        login_rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
     };
 
-    // --- UPDATED ROUTING ARCHITECTURE ---
+    // --- ROUTING ARCHITECTURE ---
 
     // 1. Group all backend logic (your existing routes) and attach the body limit
     let api_routes = app_router(state)
@@ -135,14 +137,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let serve_react_app = ServeDir::new("frontend/dist")
         .not_found_service(ServeFile::new("frontend/dist/index.html"));
 
-    // 3. Static file routes for media — must be auth-protected
+    // 3. Static file routes for media — must be auth-protected with security headers
     let static_uploads = Router::new()
         .nest_service("/uploads", ServeDir::new(upload_dir))
         .nest_service("/thumbnails", ServeDir::new(thumbnail_dir))
         .layer(axum::middleware::map_response(|mut response: axum::response::Response| async move {
-            response.headers_mut().insert(
+            let headers = response.headers_mut();
+            headers.insert(
                 axum::http::header::CACHE_CONTROL,
                 axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            );
+            headers.insert(
+                axum::http::header::CONTENT_DISPOSITION,
+                axum::http::HeaderValue::from_static("attachment"),
+            );
+            headers.insert(
+                axum::http::header::HeaderName::from_static("x-content-type-options"),
+                axum::http::HeaderValue::from_static("nosniff"),
             );
             response
         }));
@@ -158,11 +169,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         static_uploads
     };
 
-    // 4. Assemble the final application router
+    // 4. Configure CORS — restrictive by default, configurable via CORS_ORIGIN env var
+    let cors_layer = if let Ok(origin) = std::env::var("CORS_ORIGIN") {
+        let origin = origin.trim().to_string();
+        if let Ok(header_value) = HeaderValue::from_str(&origin) {
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::exact(header_value))
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+                .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::COOKIE])
+                .allow_credentials(true)
+        } else {
+            eprintln!("Warning: Invalid CORS_ORIGIN value '{}', denying cross-origin", origin);
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::exact(HeaderValue::from_static("https://localhost")))
+        }
+    } else {
+        // No CORS_ORIGIN set — deny cross-origin (same-origin requests don't need CORS)
+        CorsLayer::new()
+    };
+
+    // 5. Assemble the final application router
     let app = Router::new()
         .nest("/api", api_routes) // All your endpoints now live under /api
         .merge(static_uploads)     // Auth-protected static file serving
-        .layer(CorsLayer::permissive())
+        .layer(cors_layer)
         .fallback_service(serve_react_app); // Anything else returns the React App (login page)
 
     // ------------------------------------
@@ -170,7 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
 
     println!("Server running on http://0.0.0.0:{}", port);
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
 }

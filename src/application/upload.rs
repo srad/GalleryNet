@@ -8,6 +8,36 @@ use image::imageops::FilterType;
 use std::io::Cursor;
 use exif::Tag;
 
+/// Allowed file extensions for upload (images + videos).
+const ALLOWED_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "heic", "heif", "avif",
+    "mp4", "mov", "avi", "mkv", "webm",
+];
+
+/// Maximum image dimension (width or height) in pixels.
+const MAX_IMAGE_DIMENSION: u32 = 10_000;
+
+/// Maximum memory allocation for image decoding (~400 MB).
+const MAX_IMAGE_ALLOC: u64 = 400 * 1024 * 1024;
+
+/// Load an image with dimension and allocation limits to prevent pixel bombs.
+fn load_image_with_limits(data: &[u8]) -> Result<image::DynamicImage, DomainError> {
+    let reader = image::ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .map_err(|e| DomainError::Io(format!("Failed to detect image format: {}", e)))?;
+
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+    limits.max_alloc = Some(MAX_IMAGE_ALLOC);
+
+    let mut reader = reader;
+    reader.limits(limits);
+
+    reader.decode()
+        .map_err(|e| DomainError::Io(format!("Image decode failed: {}", e)))
+}
+
 pub struct UploadMediaUseCase {
     repo: Arc<dyn MediaRepository>,
     ai: Arc<dyn AiProcessor>,
@@ -34,6 +64,11 @@ impl UploadMediaUseCase {
             .unwrap_or("bin")
             .to_lowercase();
 
+        // Reject files with unlisted extensions
+        if !ALLOWED_EXTENSIONS.contains(&extension.as_str()) {
+            return Err(DomainError::Io(format!("File type not allowed: .{}", extension)));
+        }
+
         let is_video = matches!(extension.as_str(), "mp4" | "mov" | "avi" | "mkv" | "webm");
         let size_bytes = data.len() as i64;
 
@@ -50,7 +85,7 @@ impl UploadMediaUseCase {
             if let Ok(frames) = Self::extract_video_frames(data).await {
                 // Use the first representative frame for thumbnail and features
                 if let Some(first) = frames.first() {
-                    if let Ok(img) = image::load_from_memory(first) {
+                    if let Ok(img) = load_image_with_limits(first) {
                         width = Some(img.width());
                         height = Some(img.height());
 
@@ -100,7 +135,7 @@ impl UploadMediaUseCase {
                 }
             }
 
-            if let Ok(mut img) = image::load_from_memory(data) {
+            if let Ok(mut img) = load_image_with_limits(data) {
                 img = apply_orientation(img, orientation);
 
                 width = Some(img.width());
@@ -323,4 +358,69 @@ fn parse_date_from_filename(filename: &str) -> Option<DateTime<Utc>> {
     // Already handled by the digit extraction above in most cases
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allowed_extensions_accepted() {
+        for ext in ALLOWED_EXTENSIONS {
+            assert!(
+                ALLOWED_EXTENSIONS.contains(ext),
+                "Extension {} should be allowed",
+                ext
+            );
+        }
+    }
+
+    #[test]
+    fn dangerous_extensions_rejected() {
+        let dangerous = ["html", "htm", "svg", "exe", "js", "php", "sh", "bat", "cmd"];
+        for ext in &dangerous {
+            assert!(
+                !ALLOWED_EXTENSIONS.contains(ext),
+                "Extension {} must not be in allowlist",
+                ext
+            );
+        }
+    }
+
+    #[test]
+    fn load_image_rejects_empty_data() {
+        let result = load_image_with_limits(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_image_accepts_valid_png() {
+        // Minimal valid 1x1 white PNG
+        let png_data: Vec<u8> = {
+            let mut buf = Vec::new();
+            let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+            image::ImageEncoder::write_image(
+                encoder,
+                &[255u8, 255, 255, 255], // 1 RGBA pixel
+                1,
+                1,
+                image::ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+            buf
+        };
+        let result = load_image_with_limits(&png_data);
+        assert!(result.is_ok());
+        let img = result.unwrap();
+        assert_eq!(img.width(), 1);
+        assert_eq!(img.height(), 1);
+    }
+
+    #[test]
+    fn max_image_constants_are_sane() {
+        assert!(MAX_IMAGE_DIMENSION >= 1000);
+        assert!(MAX_IMAGE_DIMENSION <= 100_000);
+        assert!(MAX_IMAGE_ALLOC >= 100 * 1024 * 1024); // at least 100MB
+        assert!(MAX_IMAGE_ALLOC <= 1024 * 1024 * 1024); // at most 1GB
+    }
 }

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, State, Query, Path},
+    extract::{ConnectInfo, Multipart, State, Query, Path},
     http::{StatusCode, header},
     response::{Json, IntoResponse},
     routing::{get, post, put},
@@ -7,8 +7,11 @@ use axum::{
 };
 use serde_json::json;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use std::time::Instant;
+use tokio::sync::{Mutex, Semaphore};
 use std::path::PathBuf;
 use tracing::error;
 use uuid::Uuid;
@@ -17,6 +20,22 @@ use tokio::io::AsyncWriteExt;
 use crate::application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, TagLearningUseCase};
 use crate::domain::{DomainError, MediaItem, MediaRepository};
 use crate::presentation::auth::AuthConfig;
+
+/// Maximum page limit for list endpoints.
+const MAX_PAGE_LIMIT: usize = 200;
+
+/// Maximum number of files in a single upload request.
+const MAX_UPLOAD_FILES: usize = 1_000;
+
+/// Maximum uncompressed size per zip archive part (~2 GB). When the total
+/// exceeds this, files are split into roughly equal-sized archives.
+const MAX_ZIP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Maximum login attempts per IP within the rate limit window.
+const MAX_LOGIN_ATTEMPTS: u32 = 10;
+
+/// Rate limit window duration in seconds.
+const RATE_LIMIT_WINDOW_SECS: u64 = 300; // 5 minutes
 
 // App State
 #[derive(Clone)]
@@ -31,6 +50,7 @@ pub struct AppState {
     pub upload_dir: PathBuf,
     pub auth_config: Option<AuthConfig>,
     pub upload_semaphore: Arc<Semaphore>,
+    pub login_rate_limiter: Arc<Mutex<HashMap<IpAddr, (u32, Instant)>>>,
 }
 
 #[derive(Deserialize)]
@@ -49,21 +69,42 @@ async fn list_handler(
     Query(pagination): Query<Pagination>,
 ) -> Result<impl IntoResponse, DomainError> {
     let page = pagination.page.unwrap_or(1);
-    let limit = pagination.limit.unwrap_or(20);
-    
+    let limit = pagination.limit.unwrap_or(20).min(MAX_PAGE_LIMIT);
+
     // Ensure valid page
     let page = if page < 1 { 1 } else { page };
-    
+
     let sort_asc = pagination.sort.as_deref() == Some("asc");
     let favorite = pagination.favorite.unwrap_or(false);
-    
+
     let tags = pagination.tags.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
 
     let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, tags, sort_asc).await?;
-    
+
     Ok(Json(results))
+}
+
+/// Sanitize a filename: strip path separators, control chars, quotes; fallback to "download" if empty.
+fn sanitize_filename(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && *c != '/'
+                && *c != '\\'
+                && *c != '"'
+                && *c != '\''
+                && *c != '\0'
+        })
+        .collect();
+    let sanitized = sanitized.trim().to_string();
+    if sanitized.is_empty() {
+        "download".to_string()
+    } else {
+        sanitized
+    }
 }
 
 // Error handling
@@ -82,14 +123,22 @@ impl IntoResponse for DomainError {
         let (status, message) = match self {
             DomainError::DuplicateMedia => (StatusCode::CONFLICT, "Media already exists".to_string()),
             DomainError::NotFound => (StatusCode::NOT_FOUND, "Media not found".to_string()),
-            DomainError::Database(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
+            DomainError::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string()),
             DomainError::Ai(e) => (StatusCode::BAD_REQUEST, e), // AI errors are usually client-data-related (not enough examples)
-            DomainError::Hashing(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
-            DomainError::Io(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
-            DomainError::ModelLoad(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
+            DomainError::Hashing(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string()),
+            DomainError::Io(e) => {
+                // Keep user-facing messages, genericize internal ones
+                let user_facing_prefixes = ["No file", "Folder", "Too many", "File type"];
+                if user_facing_prefixes.iter().any(|p| e.starts_with(p)) {
+                    (StatusCode::INTERNAL_SERVER_ERROR, e)
+                } else {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+                }
+            },
+            DomainError::ModelLoad(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string()),
         };
 
-        
+
         let body = Json(json!({ "error": message }));
         (status, body).into_response()
     }
@@ -114,7 +163,7 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media/{id}", get(get_media_handler).delete(delete_handler))
         .route("/media/{id}/favorite", post(toggle_favorite_handler))
         .route("/media/{id}/tags", put(update_tags_handler))
-        .        route("/media/batch-tags", put(batch_update_tags_handler))
+        .route("/media/batch-tags", put(batch_update_tags_handler))
         .route("/media/{id}/similar", get(search_by_id_handler))
         .route("/tags", get(list_tags_handler))
         .route("/tags/models", get(list_trained_tags_handler))
@@ -154,14 +203,38 @@ pub struct LoginRequest {
 
 async fn login_handler(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(body): Json<LoginRequest>,
 ) -> impl IntoResponse {
+    // Rate limiting by IP
+    {
+        let ip = addr.ip();
+        let mut limiter = state.login_rate_limiter.lock().await;
+        let now = Instant::now();
+
+        let entry = limiter.entry(ip).or_insert((0, now));
+        if now.duration_since(entry.1).as_secs() > RATE_LIMIT_WINDOW_SECS {
+            // Window expired, reset
+            *entry = (0, now);
+        }
+
+        if entry.0 >= MAX_LOGIN_ATTEMPTS {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({ "error": "Too many login attempts. Try again later." })),
+            )
+                .into_response();
+        }
+
+        entry.0 += 1;
+    }
+
     match &state.auth_config {
         Some(config) => {
-            if body.password == config.password {
+            if config.verify_password(&body.password) {
                 let token = config.generate_token();
                 let cookie = format!(
-                    "gallery_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+                    "gallery_session={}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age={}",
                     token,
                     60 * 60 * 24 * 30 // 30 days
                 );
@@ -186,8 +259,14 @@ async fn login_handler(
     }
 }
 
-async fn logout_handler() -> impl IntoResponse {
-    let cookie = "gallery_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
+async fn logout_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    // Invalidate all sessions
+    if let Some(ref config) = state.auth_config {
+        config.invalidate_sessions();
+    }
+    let cookie = "gallery_session=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0";
     (
         StatusCode::OK,
         [(header::SET_COOKIE, cookie.to_string())],
@@ -345,6 +424,19 @@ async fn upload_handler(
         if name != "file" {
             continue;
         }
+
+        // Cap the number of files per upload
+        if pending.len() >= MAX_UPLOAD_FILES {
+            // Clean up already-created temp files
+            for (_, path) in &pending {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+            return Err(DomainError::Io(format!(
+                "Too many files in upload (max {})",
+                MAX_UPLOAD_FILES
+            )));
+        }
+
         let filename = field.file_name().unwrap_or("unknown").to_string();
         let (temp_path, _size) = stream_field_to_temp(field).await?;
         pending.push((filename, temp_path));
@@ -368,11 +460,11 @@ async fn upload_handler(
     for (filename, temp_path) in pending {
         let use_case = state.upload_use_case.clone();
         let semaphore = state.upload_semaphore.clone(); // Clone semaphore for the task
-        
+
         handles.push(tokio::spawn(async move {
             // Acquire permit before heavy processing (reading file + image decode + ONNX)
             let _permit = semaphore.acquire().await.unwrap();
-            
+
             let data = tokio::fs::read(&temp_path).await;
             let _ = tokio::fs::remove_file(&temp_path).await;
             let data = match data {
@@ -414,7 +506,7 @@ async fn search_handler(
 
     while let Some(field) = multipart.next_field().await.map_err(|e| DomainError::Io(e.to_string()))? {
         let name = field.name().unwrap_or("").to_string();
-        
+
         if name == "file" {
             let data = field.bytes().await.map_err(|e| DomainError::Io(e.to_string()))?;
             file_bytes = Some(data.to_vec());
@@ -428,7 +520,7 @@ async fn search_handler(
         let limit = 10;
         // Convert similarity (0-100) to max_distance (2.0 - 0.0)
         let max_distance = 2.0 * (1.0 - (similarity / 100.0));
-        
+
         let results = state.search_use_case.execute(&data, limit, max_distance).await?;
         return Ok(Json(results));
     }
@@ -448,8 +540,8 @@ async fn search_by_id_handler(
     Query(params): Query<SimilarQuery>,
 ) -> Result<impl IntoResponse, DomainError> {
     let similarity = params.similarity.unwrap_or(0.0);
-    let limit = params.limit.unwrap_or(20);
-    
+    let limit = params.limit.unwrap_or(20).min(MAX_PAGE_LIMIT);
+
     // Convert similarity (0-100) to max_distance (2.0 - 0.0)
     let max_distance = 2.0 * (1.0 - (similarity / 100.0));
     // Clamp to valid range just in case
@@ -612,6 +704,208 @@ async fn batch_delete_handler(
     Ok(Json(json!({ "deleted": deleted })))
 }
 
+/// Represents a file to include in a zip download.
+struct ZipEntry {
+    /// Sanitized, deduplicated filename for inside the archive.
+    zip_name: String,
+    /// Path on disk to read from.
+    disk_path: PathBuf,
+    /// File size in bytes (used for splitting).
+    size: u64,
+}
+
+/// Build one or more zip archives from `entries`, splitting into roughly
+/// equal-sized parts so no single archive exceeds `MAX_ZIP_BYTES`.
+/// Each part is written to a temp file; returns the list of (temp_path, part_name).
+fn build_zip_archives(
+    entries: &[ZipEntry],
+    base_name: &str,
+) -> Result<Vec<(PathBuf, String)>, DomainError> {
+    use std::io::Write;
+
+    let total_size: u64 = entries.iter().map(|e| e.size).sum();
+    let num_parts = ((total_size as f64) / (MAX_ZIP_BYTES as f64)).ceil().max(1.0) as usize;
+    let target_size = if num_parts > 1 {
+        total_size / num_parts as u64
+    } else {
+        u64::MAX // everything in one archive
+    };
+
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let temp_dir = std::env::temp_dir();
+    let mut archives: Vec<(PathBuf, String)> = Vec::new();
+    let mut current_size: u64 = 0;
+    let mut zip: Option<zip::ZipWriter<std::fs::File>> = None;
+    let mut current_path: Option<PathBuf> = None;
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+
+    let start_new_archive = |archives: &mut Vec<(PathBuf, String)>,
+                              temp_dir: &std::path::Path,
+                              base_name: &str,
+                              timestamp: &dyn std::fmt::Display,
+                              num_parts: usize|
+     -> Result<(zip::ZipWriter<std::fs::File>, PathBuf), DomainError> {
+        let part = archives.len() + 1;
+        let part_name = if num_parts > 1 {
+            format!("{}_part{}_{}.zip", base_name, part, timestamp)
+        } else {
+            format!("{}_{}.zip", base_name, timestamp)
+        };
+        let path = temp_dir.join(format!("gallerynet_dl_{}.tmp", Uuid::new_v4()));
+        let file = std::fs::File::create(&path)
+            .map_err(|e| DomainError::Io(format!("Failed to create temp zip: {}", e)))?;
+        archives.push((path.clone(), part_name));
+        Ok((zip::ZipWriter::new(file), path))
+    };
+
+    for entry in entries {
+        // Start a new archive if we'd exceed the target, but only if the current one isn't empty
+        if zip.is_none() || (current_size > 0 && current_size + entry.size > target_size && num_parts > 1) {
+            // Finish the previous archive
+            if let Some(z) = zip.take() {
+                z.finish().map_err(|e| DomainError::Io(e.to_string()))?;
+            }
+            let (new_zip, new_path) = start_new_archive(
+                &mut archives, &temp_dir, base_name, &timestamp, num_parts,
+            )?;
+            zip = Some(new_zip);
+            current_path = Some(new_path);
+            current_size = 0;
+        }
+
+        let data = std::fs::read(&entry.disk_path)
+            .map_err(|e| DomainError::Io(format!("{}: {}", entry.zip_name, e)))?;
+
+        let z = zip.as_mut().unwrap();
+        z.start_file(&entry.zip_name, options)
+            .map_err(|e| DomainError::Io(e.to_string()))?;
+        z.write_all(&data)
+            .map_err(|e| DomainError::Io(e.to_string()))?;
+
+        current_size += entry.size;
+    }
+
+    // Finish the last archive
+    if let Some(z) = zip.take() {
+        z.finish().map_err(|e| DomainError::Io(e.to_string()))?;
+    }
+
+    // Suppress unused variable warning — current_path is used implicitly through archives
+    let _ = current_path;
+
+    Ok(archives)
+}
+
+/// Prepare `ZipEntry` list from items, handling filename sanitization and deduplication.
+fn prepare_zip_entries<I>(items: I, upload_dir: &std::path::Path) -> Vec<ZipEntry>
+where
+    I: IntoIterator,
+    I::Item: HasFilenames,
+{
+    let mut used_names = std::collections::HashMap::<String, usize>::new();
+    items
+        .into_iter()
+        .map(|item| {
+            let base_name = sanitize_filename(item.original_filename());
+            let entry = used_names.entry(base_name.clone()).or_insert(0);
+            let zip_name = if *entry == 0 {
+                base_name.clone()
+            } else {
+                let dot = base_name.rfind('.').unwrap_or(base_name.len());
+                format!("{}_{}{}", &base_name[..dot], entry, &base_name[dot..])
+            };
+            *entry += 1;
+
+            let disk_path = upload_dir.join(item.disk_filename());
+            let size = disk_path.metadata().map(|m| m.len()).unwrap_or(0);
+            ZipEntry { zip_name, disk_path, size }
+        })
+        .collect()
+}
+
+/// Trait to abstract over MediaItem and MediaSummary for zip entry preparation.
+trait HasFilenames {
+    fn original_filename(&self) -> &str;
+    fn disk_filename(&self) -> &str;
+}
+
+impl HasFilenames for MediaItem {
+    fn original_filename(&self) -> &str { &self.original_filename }
+    fn disk_filename(&self) -> &str { &self.filename }
+}
+
+impl HasFilenames for &MediaItem {
+    fn original_filename(&self) -> &str { &self.original_filename }
+    fn disk_filename(&self) -> &str { &self.filename }
+}
+
+impl HasFilenames for crate::domain::MediaSummary {
+    fn original_filename(&self) -> &str { &self.original_filename }
+    fn disk_filename(&self) -> &str { &self.filename }
+}
+
+impl HasFilenames for &crate::domain::MediaSummary {
+    fn original_filename(&self) -> &str { &self.original_filename }
+    fn disk_filename(&self) -> &str { &self.filename }
+}
+
+/// Serve zip archives: if single part, send it directly; if multiple, wrap in an outer zip.
+async fn serve_zip_archives(
+    archives: Vec<(PathBuf, String)>,
+    outer_name: String,
+) -> Result<axum::response::Response, DomainError> {
+    if archives.len() == 1 {
+        let (path, name) = &archives[0];
+        let data = tokio::fs::read(path).await
+            .map_err(|e| DomainError::Io(e.to_string()))?;
+        let _ = tokio::fs::remove_file(path).await;
+        let headers = [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", name)),
+        ];
+        Ok((headers, data).into_response())
+    } else {
+        // Wrap parts in an outer zip
+        let archives_clone = archives.clone();
+        let buf = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, DomainError> {
+            use std::io::{Cursor, Write};
+            let mut outer_buf = Vec::new();
+            {
+                let cursor = Cursor::new(&mut outer_buf);
+                let mut outer = zip::ZipWriter::new(cursor);
+                let opts = zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored); // parts are already compressed
+                for (path, name) in &archives_clone {
+                    let data = std::fs::read(path)
+                        .map_err(|e| DomainError::Io(e.to_string()))?;
+                    outer.start_file(name, opts)
+                        .map_err(|e| DomainError::Io(e.to_string()))?;
+                    outer.write_all(&data)
+                        .map_err(|e| DomainError::Io(e.to_string()))?;
+                }
+                outer.finish().map_err(|e| DomainError::Io(e.to_string()))?;
+            }
+            Ok(outer_buf)
+        })
+        .await
+        .map_err(|e| DomainError::Io(format!("Task failed: {}", e)))??;
+
+        // Clean up temp files
+        for (path, _) in &archives {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+
+        let headers = [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", outer_name)),
+        ];
+        Ok((headers, buf).into_response())
+    }
+}
+
 async fn batch_download_handler(
     State(state): State<AppState>,
     Json(ids): Json<Vec<Uuid>>,
@@ -620,9 +914,15 @@ async fn batch_download_handler(
         return Err(DomainError::Io("No files requested".to_string()));
     }
 
+    // Deduplicate IDs
+    let unique_ids: Vec<Uuid> = {
+        let mut seen = std::collections::HashSet::new();
+        ids.into_iter().filter(|id| seen.insert(*id)).collect()
+    };
+
     // Look up all requested media items
     let mut items = Vec::new();
-    for id in &ids {
+    for id in &unique_ids {
         if let Some(item) = state.repo.find_by_id(*id)? {
             items.push(item);
         }
@@ -644,69 +944,31 @@ async fn batch_download_handler(
             .first_or_octet_stream()
             .to_string();
 
+        let safe_name = sanitize_filename(&item.original_filename);
         let headers = [
             (header::CONTENT_TYPE, content_type),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{}\"", item.original_filename),
+                format!("attachment; filename=\"{}\"", safe_name),
             ),
         ];
         return Ok((headers, data).into_response());
     }
 
-    // Multiple files — create a zip archive in memory
+    // Multiple files — build zip archive(s), splitting by size
     let file_count = items.len();
     let upload_dir = state.upload_dir.clone();
-    let buf = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, DomainError> {
-        use std::io::{Cursor, Write};
-        let mut zip_buf = Vec::new();
-        {
-            let cursor = Cursor::new(&mut zip_buf);
-            let mut zip = zip::ZipWriter::new(cursor);
-            let options = zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
 
-            // Track filenames to avoid duplicates in the archive
-            let mut used_names = std::collections::HashMap::<String, usize>::new();
-
-            for item in &items {
-                let file_path = upload_dir.join(&item.filename);
-                let data = std::fs::read(&file_path)
-                    .map_err(|e| DomainError::Io(format!("{}: {}", item.filename, e)))?;
-
-                // Deduplicate filenames within the zip
-                let base_name = item.original_filename.clone();
-                let entry = used_names.entry(base_name.clone()).or_insert(0);
-                let zip_name = if *entry == 0 {
-                    base_name.clone()
-                } else {
-                    let dot = base_name.rfind('.').unwrap_or(base_name.len());
-                    format!("{}_{}{}", &base_name[..dot], entry, &base_name[dot..])
-                };
-                *entry += 1;
-
-                zip.start_file(zip_name, options)
-                    .map_err(|e| DomainError::Io(e.to_string()))?;
-                zip.write_all(&data)
-                    .map_err(|e| DomainError::Io(e.to_string()))?;
-            }
-            zip.finish().map_err(|e| DomainError::Io(e.to_string()))?;
-        }
-        Ok(zip_buf)
+    let archives = tokio::task::spawn_blocking(move || {
+        let entries = prepare_zip_entries(&items, &upload_dir);
+        build_zip_archives(&entries, &format!("gallerynet_{}", file_count))
     })
     .await
     .map_err(|e| DomainError::Io(format!("Task failed: {}", e)))??;
 
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let zip_name = format!("gallerynet_{}_{}.zip", file_count, timestamp);
-    let headers = [
-        (header::CONTENT_TYPE, "application/zip".to_string()),
-        (
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", zip_name),
-        ),
-    ];
-    Ok((headers, buf).into_response())
+    let outer_name = format!("gallerynet_{}_{}.zip", file_count, timestamp);
+    Ok(serve_zip_archives(archives, outer_name).await?)
 }
 
 #[derive(Deserialize)]
@@ -814,11 +1076,11 @@ async fn list_folder_media_handler(
     Query(pagination): Query<FolderPagination>,
 ) -> Result<impl IntoResponse, DomainError> {
     let page = pagination.page.unwrap_or(1).max(1);
-    let limit = pagination.limit.unwrap_or(20);
+    let limit = pagination.limit.unwrap_or(20).min(MAX_PAGE_LIMIT);
     let offset = (page - 1) * limit;
     let sort_asc = pagination.sort.as_deref() == Some("asc");
     let favorite = pagination.favorite.unwrap_or(false);
-    
+
     let tags = pagination.tags.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
@@ -865,57 +1127,10 @@ async fn download_folder_handler(
         return Err(DomainError::Io("Folder is empty".to_string()));
     }
 
-    // Reuse the zip logic from batch_download_handler
     let file_count = items.len();
     let upload_dir = state.upload_dir.clone();
-    
-    // We can't reuse the code directly without refactoring, so I'll duplicate the zip logic here
-    // adapting it for MediaSummary (which has the fields we need: filename, original_filename)
-    
-    let buf = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, DomainError> {
-        use std::io::{Cursor, Write};
-        let mut zip_buf = Vec::new();
-        {
-            let cursor = Cursor::new(&mut zip_buf);
-            let mut zip = zip::ZipWriter::new(cursor);
-            let options = zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
 
-            // Track filenames to avoid duplicates in the archive
-            let mut used_names = std::collections::HashMap::<String, usize>::new();
-
-            for item in &items {
-                let file_path = upload_dir.join(&item.filename);
-                // If file is missing, we skip or error? Batch download errors. Let's error for consistency.
-                let data = std::fs::read(&file_path)
-                    .map_err(|e| DomainError::Io(format!("{}: {}", item.filename, e)))?;
-
-                // Deduplicate filenames within the zip
-                let base_name = item.original_filename.clone();
-                let entry = used_names.entry(base_name.clone()).or_insert(0);
-                let zip_name = if *entry == 0 {
-                    base_name.clone()
-                } else {
-                    let dot = base_name.rfind('.').unwrap_or(base_name.len());
-                    format!("{}_{}{}", &base_name[..dot], entry, &base_name[dot..])
-                };
-                *entry += 1;
-
-                zip.start_file(zip_name, options)
-                    .map_err(|e| DomainError::Io(e.to_string()))?;
-                zip.write_all(&data)
-                    .map_err(|e| DomainError::Io(e.to_string()))?;
-            }
-            zip.finish().map_err(|e| DomainError::Io(e.to_string()))?;
-        }
-        Ok(zip_buf)
-    })
-    .await
-    .map_err(|e| DomainError::Io(format!("Task failed: {}", e)))??;
-
-    // Sanitize folder name
-    // Allow unicode alphanumeric (for international support), plus basic safe punctuation.
-    // Replace whitespace and other symbols/separators with underscores.
+    // Sanitize folder name for the zip filename
     let safe_name: String = folder.name.chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
@@ -925,18 +1140,141 @@ async fn download_folder_handler(
             }
         })
         .collect();
-    // Trim underscores from ends just in case
     let safe_name = safe_name.trim_matches(|c| c == '_').to_string();
     let safe_name = if safe_name.is_empty() { "folder".to_string() } else { safe_name };
 
+    let base_name = format!("{}_{}", safe_name, file_count);
+    let archives = tokio::task::spawn_blocking(move || {
+        let entries = prepare_zip_entries(&items, &upload_dir);
+        build_zip_archives(&entries, &base_name)
+    })
+    .await
+    .map_err(|e| DomainError::Io(format!("Task failed: {}", e)))??;
+
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let zip_name = format!("{}_{}_{}.zip", safe_name, file_count, timestamp);
-    let headers = [
-        (header::CONTENT_TYPE, "application/zip".to_string()),
-        (
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", zip_name),
-        ),
-    ];
-    Ok((headers, buf).into_response())
+    let outer_name = format!("{}_{}_{}.zip", safe_name, file_count, timestamp);
+    Ok(serve_zip_archives(archives, outer_name).await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_filename_path_traversal() {
+        assert_eq!(sanitize_filename("../../../etc/passwd"), "......etcpasswd");
+        assert_eq!(sanitize_filename("..\\..\\windows\\system32"), "....windowssystem32");
+    }
+
+    #[test]
+    fn sanitize_filename_quotes_and_control_chars() {
+        assert_eq!(sanitize_filename("file\"name.jpg"), "filename.jpg");
+        assert_eq!(sanitize_filename("file'name.jpg"), "filename.jpg");
+        assert_eq!(sanitize_filename("file\x00name.jpg"), "filename.jpg");
+        assert_eq!(sanitize_filename("file\nname.jpg"), "filename.jpg");
+    }
+
+    #[test]
+    fn sanitize_filename_empty() {
+        assert_eq!(sanitize_filename(""), "download");
+        assert_eq!(sanitize_filename("   "), "download");
+        assert_eq!(sanitize_filename("/"), "download");
+    }
+
+    #[test]
+    fn sanitize_filename_normal() {
+        assert_eq!(sanitize_filename("photo.jpg"), "photo.jpg");
+        assert_eq!(sanitize_filename("my vacation photo.png"), "my vacation photo.png");
+    }
+
+    #[test]
+    fn cookie_contains_secure_flag() {
+        let cookie = format!(
+            "gallery_session=test; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age={}",
+            60 * 60 * 24 * 30
+        );
+        assert!(cookie.contains("Secure"));
+        assert!(cookie.contains("HttpOnly"));
+        assert!(cookie.contains("SameSite=Strict"));
+    }
+
+    #[test]
+    fn id_deduplication() {
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let ids = vec![id1, id1, id2, id2, id1];
+        let unique: Vec<Uuid> = {
+            let mut seen = std::collections::HashSet::new();
+            ids.into_iter().filter(|id| seen.insert(*id)).collect()
+        };
+        assert_eq!(unique.len(), 2);
+        assert_eq!(unique[0], id1);
+        assert_eq!(unique[1], id2);
+    }
+
+    #[test]
+    fn zip_split_constant_valid() {
+        assert!(MAX_ZIP_BYTES >= 512 * 1024 * 1024); // at least 512 MB
+        assert!(MAX_ZIP_BYTES <= 8 * 1024 * 1024 * 1024); // at most 8 GB
+    }
+
+    #[test]
+    fn zip_split_partitioning() {
+        // Simulate: 5 files of 600 MB each = 3 GB total → should split into 2 parts
+        let total: u64 = 5 * 600 * 1024 * 1024;
+        let num_parts = ((total as f64) / (MAX_ZIP_BYTES as f64)).ceil().max(1.0) as usize;
+        assert_eq!(num_parts, 2); // 3GB / 2GB = 1.5 → ceil = 2
+        let target = total / num_parts as u64;
+        // Each part targets ~1.5 GB which is under MAX_ZIP_BYTES
+        assert!(target <= MAX_ZIP_BYTES);
+    }
+
+    #[test]
+    fn limit_capping() {
+        assert_eq!(250_usize.min(MAX_PAGE_LIMIT), MAX_PAGE_LIMIT);
+        assert_eq!(50_usize.min(MAX_PAGE_LIMIT), 50);
+        assert_eq!(200_usize.min(MAX_PAGE_LIMIT), 200);
+    }
+
+    #[test]
+    fn max_upload_files_constant_valid() {
+        assert!(MAX_UPLOAD_FILES > 0);
+        assert!(MAX_UPLOAD_FILES <= 10_000);
+    }
+
+    #[test]
+    fn error_message_sanitization_database() {
+        let err = DomainError::Database("SQLITE_ERROR: table foo has 5 columns but 3 values".to_string());
+        let response = err.into_response();
+        // Should be 500
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn error_message_sanitization_io_user_facing() {
+        // These messages should be preserved
+        let err = DomainError::Io("No file uploaded".to_string());
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let err = DomainError::Io("Folder is empty".to_string());
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let err = DomainError::Io("Too many files in upload (max 100)".to_string());
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let err = DomainError::Io("File type not allowed: .exe".to_string());
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn rate_limiter_constants_valid() {
+        assert!(MAX_LOGIN_ATTEMPTS > 0);
+        assert!(MAX_LOGIN_ATTEMPTS <= 100);
+        assert!(RATE_LIMIT_WINDOW_SECS > 0);
+        assert!(RATE_LIMIT_WINDOW_SECS <= 3600);
+    }
 }

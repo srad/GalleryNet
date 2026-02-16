@@ -202,7 +202,7 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
             md:relative md:z-auto md:translate-x-0
             ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
         `}>
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <div className="py-4 px-6 border-b border-gray-100 flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
                         GalleryNet

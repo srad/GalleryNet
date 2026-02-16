@@ -171,7 +171,16 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
         });
     }, [setSearchParams]);
 
+    const handleDragStart = useCallback((item: MediaItem, e: React.DragEvent) => {
+        if (item.id) {
+            e.dataTransfer.setData('application/x-gallerynet-media', JSON.stringify([item.id]));
+            e.dataTransfer.effectAllowed = 'copyMove';
+            e.dataTransfer.setData('text/plain', `Media: 1 item`);
+        }
+    }, []);
+
     // Render modal logic
+
     const renderModal = () => {
         if (!selectedMediaId) return null;
         
@@ -332,7 +341,9 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                                     key={`search-${item.id}`} 
                                     item={item}
                                     onClick={() => handleCardClick(item)}
+                                    onDragStart={(e) => handleDragStart(item, e)}
                                 />
+
                             ))}
                         </div>
                     </div>

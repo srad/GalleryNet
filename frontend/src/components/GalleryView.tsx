@@ -8,6 +8,7 @@ import TagFilter from './TagFilter';
 import TagInput from './TagInput';
 import { apiFetch, fireUnauthorized } from '../auth';
 
+
 import ConfirmDialog from './ConfirmDialog';
 import AlertDialog from './AlertDialog';
 import LoadingIndicator from './LoadingIndicator';
@@ -118,6 +119,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const [filterTags, setFilterTags] = useState<string[]>([]);
     // Removed local selectedFilename state in favor of URL param
     const [showBatchTagModal, setShowBatchTagModal] = useState(false);
+    const [showClearTagsConfirm, setShowClearTagsConfirm] = useState(false);
     const [batchTags, setBatchTags] = useState<string[]>([]);
     const [isBatchTagging, setIsBatchTagging] = useState(false);
     const [isAutoTagging, setIsAutoTagging] = useState(false);
@@ -125,7 +127,10 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const abortControllerRef = useRef<AbortController | null>(null);
     const [showCancelAutoTagConfirm, setShowCancelAutoTagConfirm] = useState(false);
     const [showStartAutoTagConfirm, setShowStartAutoTagConfirm] = useState(false);
+    const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
+    const [showRemoveFromFolderConfirm, setShowRemoveFromFolderConfirm] = useState(false);
     const [autoTagResult, setAutoTagResult] = useState<{ title: string; message: string } | null>(null);
+
 
     // --- Grouping state ---
     const [isGrouped, setIsGrouped] = useState(false);
@@ -207,7 +212,32 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         lastClickedRef.current = null;
     }, []);
 
+    const handleDragStartMedia = useCallback((item: MediaItem, e: React.DragEvent) => {
+        // Cancel any active marquee selection to prevent it from getting stuck during drag
+        marqueeStartRef.current = null;
+        isDraggingRef.current = false;
+        setMarquee(null);
+
+        let ids: string[] = [];
+        if (selected.has(item.filename)) {
+            // Dragging one of the selected items - drag all selected
+            ids = mediaRef.current
+                .filter(m => selected.has(m.filename) && m.id)
+                .map(m => m.id!);
+        } else if (item.id) {
+            // Dragging an unselected item - drag just that one
+            ids = [item.id];
+        }
+
+        if (ids.length > 0) {
+            e.dataTransfer.setData('application/x-gallerynet-media', JSON.stringify(ids));
+            e.dataTransfer.effectAllowed = 'copyMove';
+            e.dataTransfer.setData('text/plain', `Media: ${ids.length} items`);
+        }
+    }, [selected]);
+
     // --- Inline upload helpers ---
+
     const processNextUpload = useCallback(() => {
         while (uploadActiveRef.current < UPLOAD_CONCURRENCY && uploadQueueRef.current.length > 0) {
             const file = uploadQueueRef.current.shift()!;
@@ -506,8 +536,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
     }, []);
 
-    const handleBatchTag = useCallback(async () => {
-        if (!batchTags.length && !confirm("This will remove all tags from selected items. Continue?")) return;
+    const handleBatchTag = useCallback(async (force = false) => {
+        if (!batchTags.length && !force) {
+            setShowClearTagsConfirm(true);
+            return;
+        }
         
         const ids = media
             .filter(m => selected.has(m.filename) && m.id)
@@ -533,6 +566,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             }));
 
             setShowBatchTagModal(false);
+            setShowClearTagsConfirm(false);
             setBatchTags([]);
             exitSelectionMode();
             // Refresh via refreshKey ensures full sync (including is_auto from other processes)
@@ -544,6 +578,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             setIsBatchTagging(false);
         }
     }, [batchTags, media, selected, exitSelectionMode, onUploadComplete]);
+
 
 
     const handleAutoTag = useCallback(async () => {
@@ -761,10 +796,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     }, [selected.size]);
 
     // --- Batch delete ---
-    const handleBatchDelete = useCallback(async () => {
+    const handleBatchDelete = useCallback(async (force = false) => {
         if (selected.size === 0) return;
-        const count = selected.size;
-        if (!window.confirm(`Delete ${count} item${count > 1 ? 's' : ''}? This cannot be undone.`)) return;
+        if (!force) {
+            setShowBatchDeleteConfirm(true);
+            return;
+        }
 
         setIsDeleting(true);
         try {
@@ -784,6 +821,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 const deletedFilenames = new Set(selected);
                 setMedia(prev => prev.filter(m => !deletedFilenames.has(m.filename)));
                 exitSelectionMode();
+                setShowBatchDeleteConfirm(false);
                 if (activeFolderId) onFoldersChanged();
             } else {
                 console.error('Batch delete failed:', res.status);
@@ -820,10 +858,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     }, [activeFolderId, onFoldersChanged, setSearchParams]);
 
     // --- Remove from folder (when viewing a folder) ---
-    const handleRemoveFromFolder = useCallback(async () => {
+    const handleRemoveFromFolder = useCallback(async (force = false) => {
         if (selected.size === 0 || !activeFolderId) return;
-        const count = selected.size;
-        if (!window.confirm(`Remove ${count} item${count > 1 ? 's' : ''} from this folder?`)) return;
+        if (!force) {
+            setShowRemoveFromFolderConfirm(true);
+            return;
+        }
 
         setIsDeleting(true);
         try {
@@ -841,6 +881,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 const removedFilenames = new Set(selected);
                 setMedia(prev => prev.filter(m => !removedFilenames.has(m.filename)));
                 exitSelectionMode();
+                setShowRemoveFromFolderConfirm(false);
                 onFoldersChanged();
             }
         } catch (e) {
@@ -849,6 +890,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             setIsDeleting(false);
         }
     }, [selected, media, activeFolderId, exitSelectionMode, onFoldersChanged]);
+
 
     // --- Add selected items to a folder ---
     const handleAddToFolder = useCallback(async (targetFolderId: string) => {
@@ -1071,10 +1113,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         if (e.button !== 0 || singleSelect) return;
         // Don't start marquee if clicking directly on a card's interactive element
         const target = e.target as HTMLElement;
-        if (!selectionMode && target.closest('[data-filename]')) return;
+        if (target.closest('[data-filename]')) return;
 
-        // Enter selection mode automatically when starting a drag
+        // Enter selection mode automatically when starting a marquee
         if (!selectionMode) setSelectionMode(true);
+
 
         const scrollParent = getScrollParent();
         const scrollLeft = scrollParent?.scrollLeft ?? 0;
@@ -1149,7 +1192,44 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         };
     }, [getScrollParent, getCardsInRect]);
 
+    // Keyboard shortcuts (Ctrl+A to select all, Delete to remove/delete)
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Check if the user is typing in an input/textarea
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+                return;
+            }
+
+            // Ctrl+A or Cmd+A (Select All)
+            if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+                e.preventDefault();
+                if (media.length > 0) {
+                    if (!selectionMode) setSelectionMode(true);
+                    const allFilenames = new Set(media.map(m => m.filename));
+                    setSelected(allFilenames);
+                }
+            }
+
+            // Delete key
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (selectionMode && selected.size > 0) {
+                    e.preventDefault();
+                    if (activeFolderId) {
+                        handleRemoveFromFolder();
+                    } else {
+                        handleBatchDelete();
+                    }
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [media, selectionMode, selected, activeFolderId, handleRemoveFromFolder, handleBatchDelete]);
+
     return (
+
         <div ref={scrollContainerRef} className="max-w-7xl mx-auto px-4 md:px-8 pb-12">
             {/* Modern Toolbar */}
             <div 
@@ -1541,7 +1621,9 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                     selectionMode={selectionMode}
                                     onSelect={(e) => handleSelect(item.filename, e)}
                                     onToggleFavorite={() => handleToggleFavorite(item)}
+                                    onDragStart={(e) => handleDragStartMedia(item, e)}
                                 />
+
                             </Fragment>
                         );
                     })}
@@ -1585,7 +1667,9 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         selectionMode={selectionMode}
                         onSelect={(e) => handleSelect(item.filename, e)}
                         onToggleFavorite={() => handleToggleFavorite(item)}
+                        onDragStart={(e) => handleDragStartMedia(item, e)}
                     />
+
                 ))}
             </div>
                         </div>
@@ -1729,11 +1813,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
                     {/* Remove from folder (only when viewing a folder) */}
                     {activeFolderId && (
-                        <button
-                            onClick={handleRemoveFromFolder}
-                            disabled={isDeleting}
-                            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 transition-colors"
-                        >
+                                <button
+                                    onClick={() => handleRemoveFromFolder()}
+                                    disabled={isDeleting}
+                                    className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 transition-colors"
+                                >
+
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
@@ -1755,10 +1840,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
                     {/* Delete */}
                     <button
-                        onClick={handleBatchDelete}
+                        onClick={() => handleBatchDelete()}
                         disabled={isDeleting}
                         className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
                     >
+
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                         </svg>
@@ -1780,7 +1866,22 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 </div>
             )}
 
+            {/* Busy overlay for batch operations */}
+            {(isDeleting || isAddingToFolder) && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl px-8 py-6 flex flex-col items-center gap-4 mx-4">
+                        <LoadingIndicator 
+                            variant="centered" 
+                            label={isAddingToFolder ? "Adding to folder..." : (activeFolderId ? "Removing..." : "Deleting...")} 
+                            size="lg" 
+                            color={isAddingToFolder ? "text-amber-600" : (activeFolderId ? "text-orange-600" : "text-red-600")} 
+                        />
+                    </div>
+                </div>
+            )}
+
             {/* Download progress overlay */}
+
             {isDownloading && downloadProgress && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl px-6 sm:px-8 py-5 sm:py-6 flex flex-col items-center gap-4 mx-4 w-[calc(100%-2rem)] max-w-xs sm:mx-0 sm:w-auto sm:min-w-[280px]">
@@ -1900,10 +2001,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                 Cancel
                             </button>
                             <button
-                                onClick={handleBatchTag}
+                                onClick={() => handleBatchTag()}
                                 disabled={isBatchTagging}
                                 className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm disabled:opacity-50 transition-colors flex items-center gap-1.5"
                             >
+
                                 {isBatchTagging ? (
                                     <LoadingIndicator size="sm" color="text-white" label="Saving..." />
                                 ) : 'Apply Tags'}
@@ -1943,7 +2045,41 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 onCancel={() => setShowCancelAutoTagConfirm(false)}
             />
 
+            <ConfirmDialog
+                isOpen={showClearTagsConfirm}
+                title="Clear Tags?"
+                message={`This will remove all tags from the ${selected.size} selected items. This cannot be undone.`}
+                confirmLabel="Clear Tags"
+                cancelLabel="Cancel"
+                isDestructive={true}
+                onConfirm={() => handleBatchTag(true)}
+                onCancel={() => setShowClearTagsConfirm(false)}
+            />
+
+            <ConfirmDialog
+                isOpen={showBatchDeleteConfirm}
+                title="Delete Media?"
+                message={`Are you sure you want to delete ${selected.size} items? This will permanently remove the original files and thumbnails.`}
+                confirmLabel="Delete Permanently"
+                cancelLabel="Cancel"
+                isDestructive={true}
+                onConfirm={() => handleBatchDelete(true)}
+                onCancel={() => setShowBatchDeleteConfirm(false)}
+            />
+
+            <ConfirmDialog
+                isOpen={showRemoveFromFolderConfirm}
+                title="Remove from Folder?"
+                message={`Remove ${selected.size} items from "${activeFolderName}"? The media items will remain in your gallery.`}
+                confirmLabel="Remove"
+                cancelLabel="Cancel"
+                isDestructive={true}
+                onConfirm={() => handleRemoveFromFolder(true)}
+                onCancel={() => setShowRemoveFromFolderConfirm(false)}
+            />
+
             {/* Auto Tag Result Dialog */}
+
             <AlertDialog
                 isOpen={!!autoTagResult}
                 title={autoTagResult?.title || ''}

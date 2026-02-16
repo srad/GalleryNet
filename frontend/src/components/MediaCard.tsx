@@ -11,7 +11,9 @@ interface MediaCardProps {
     /** Called when the selection checkbox is toggled */
     onSelect?: (e: React.MouseEvent) => void;
     onToggleFavorite?: () => void;
+    onDragStart?: (e: React.DragEvent) => void;
 }
+
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'wmv']);
 
@@ -35,14 +37,18 @@ function formatBytes(bytes: number): string {
     return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export default function MediaCard({ item, onClick, selected, selectionMode, onSelect, onToggleFavorite }: MediaCardProps) {
+export default function MediaCard({ item, onClick, selected, selectionMode, onSelect, onToggleFavorite, onDragStart }: MediaCardProps) {
+
     const video = isVideo(item.filename);
 
     return (
         <div
             data-filename={item.filename}
             onClick={selectionMode ? onSelect : onClick}
+            draggable={!!onDragStart}
+            onDragStart={onDragStart}
             className={`group relative block overflow-hidden rounded-lg bg-gray-100 border shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 w-full text-left cursor-pointer ${
+
                 selected
                     ? 'border-blue-500 ring-2 ring-blue-500/40'
                     : 'border-gray-200/60'

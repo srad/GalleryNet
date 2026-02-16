@@ -117,7 +117,16 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
         }
     }, [onPrev, onNext]);
 
+    const handleDragStart = useCallback((e: React.DragEvent) => {
+        if (item.id) {
+            e.dataTransfer.setData('application/x-gallerynet-media', JSON.stringify([item.id]));
+            e.dataTransfer.effectAllowed = 'copyMove';
+            e.dataTransfer.setData('text/plain', `Media: 1 item`);
+        }
+    }, [item.id]);
+
     const handleTagsChange = useCallback(async (newTags: string[]) => {
+
         if (!displayItem.id) return;
         // Optimistic update locally
         const newTagDetails = newTags.map(name => ({ name, is_auto: false }));
@@ -228,16 +237,21 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                             src={mediaUrl}
                             controls
                             autoPlay
-                            className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl"
+                            draggable
+                            onDragStart={handleDragStart}
+                            className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl cursor-grab active:cursor-grabbing"
                         />
                     ) : (
                         <img
                             key={item.filename}
                             src={mediaUrl}
                             alt={item.original_filename || item.filename}
-                            className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl object-contain"
+                            draggable
+                            onDragStart={handleDragStart}
+                            className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl object-contain cursor-grab active:cursor-grabbing"
                         />
                     )}
+
                 </div>
 
                 {/* Details panel */}

@@ -4,6 +4,8 @@ import {PhotoIcon, SearchIcon, HeartIcon} from './Icons';
 import type {Folder} from '../types';
 import {apiFetch} from '../auth';
 import LibraryInfo from './LibraryInfo';
+import ConfirmDialog from './ConfirmDialog';
+
 
 interface SidebarProps {
     refreshKey: number;
@@ -27,10 +29,17 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
     const [renameValue, setRenameValue] = useState('');
     const renameInputRef = useRef<HTMLInputElement>(null);
 
+    // --- Delete confirmation state ---
+    const [folderToDelete, setFolderToDelete] = useState<Folder | null>(null);
+
     // --- Drag-to-reorder state ---
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [dropIndex, setDropIndex] = useState<number | null>(null);
+    const [mediaDropTargetId, setMediaDropTargetId] = useState<string | null>(null);
+    const [dropSuccessId, setDropSuccessId] = useState<string | null>(null);
     const dragCounterRef = useRef(0);
+
+
 
     const handleCreateFolder = useCallback(async () => {
         const name = newFolderName.trim();
@@ -50,15 +59,21 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
         setIsCreating(false);
     }, [newFolderName, onFoldersChanged]);
 
-    const handleDeleteFolder = useCallback(async (e: React.MouseEvent, folderId: string) => {
+    const handleDeleteFolder = useCallback(async (e: React.MouseEvent, folder: Folder) => {
         e.preventDefault(); // Prevent navigation
         e.stopPropagation();
-        if (!window.confirm('Delete this folder? Media files will not be deleted.')) return;
+        setFolderToDelete(folder);
+    }, []);
+
+    const confirmDeleteFolder = useCallback(async () => {
+        if (!folderToDelete) return;
         try {
-            const res = await apiFetch(`/api/folders/${folderId}`, {method: 'DELETE'});
+            const res = await apiFetch(`/api/folders/${folderToDelete.id}`, {method: 'DELETE'});
             if (res.ok) onFoldersChanged();
         } catch { /* ignore */ }
-    }, [onFoldersChanged]);
+        setFolderToDelete(null);
+    }, [folderToDelete, onFoldersChanged]);
+
 
     // --- Rename handlers ---
     const startRename = useCallback((e: React.MouseEvent, folder: Folder) => {
@@ -112,32 +127,64 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
         dragCounterRef.current = 0;
     }, []);
 
-    const handleDragEnter = useCallback((e: React.DragEvent, index: number) => {
+    const handleDragEnter = useCallback((e: React.DragEvent, index: number, folderId: string) => {
         e.preventDefault();
         dragCounterRef.current++;
-        if (dragIndex !== null && dragIndex !== index) {
+        if (e.dataTransfer.types.includes('application/x-gallerynet-media')) {
+            setMediaDropTargetId(folderId);
+        } else if (dragIndex !== null && dragIndex !== index) {
             setDropIndex(index);
         }
     }, [dragIndex]);
 
     const handleDragOver = useCallback((e: React.DragEvent) => {
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
+        if (e.dataTransfer.types.includes('application/x-gallerynet-media')) {
+            e.dataTransfer.dropEffect = 'copy';
+        } else {
+            e.dataTransfer.dropEffect = 'move';
+        }
     }, []);
 
-    const handleDragLeave = useCallback((_e: React.DragEvent, index: number) => {
+    const handleDragLeave = useCallback((_e: React.DragEvent, _index: number) => {
         dragCounterRef.current--;
-        if (dragCounterRef.current === 0 && dropIndex === index) {
+        if (dragCounterRef.current === 0) {
             setDropIndex(null);
+            setMediaDropTargetId(null);
         }
-    }, [dropIndex]);
+    }, []);
 
-    const handleDrop = useCallback(async (e: React.DragEvent, toIndex: number) => {
+    const handleDrop = useCallback(async (e: React.DragEvent, toIndex: number, folderId: string) => {
         e.preventDefault();
         dragCounterRef.current = 0;
         const fromIndex = dragIndex;
+        const mediaData = e.dataTransfer.getData('application/x-gallerynet-media');
+        
         setDragIndex(null);
         setDropIndex(null);
+        setMediaDropTargetId(null);
+
+        if (mediaData) {
+            // Media drop
+            try {
+                const ids = JSON.parse(mediaData);
+                if (Array.isArray(ids) && ids.length > 0) {
+                    const res = await apiFetch(`/api/folders/${folderId}/media`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(ids),
+                    });
+                    if (res.ok) {
+                        onFoldersChanged();
+                        setDropSuccessId(folderId);
+                        setTimeout(() => setDropSuccessId(null), 2000);
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to drop media:', err);
+            }
+            return;
+        }
 
         if (fromIndex === null || fromIndex === toIndex) return;
 
@@ -157,6 +204,7 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
             onFoldersChanged();
         } catch { /* ignore */ }
     }, [dragIndex, folders, onFoldersChanged]);
+
 
     const isActive = (path: string) => {
         if (path === '/') return location.pathname === '/';
@@ -222,11 +270,15 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                             draggable={renamingId !== folder.id}
                             onDragStart={(e) => handleDragStart(e, index)}
                             onDragEnd={handleDragEnd}
-                            onDragEnter={(e) => handleDragEnter(e, index)}
+                            onDragEnter={(e) => handleDragEnter(e, index, folder.id)}
                             onDragOver={handleDragOver}
                             onDragLeave={(e) => handleDragLeave(e, index)}
-                            onDrop={(e) => handleDrop(e, index)}
-                            className={`relative ${
+                            onDrop={(e) => handleDrop(e, index, folder.id)}
+                            className={`relative transition-all duration-200 ${
+                                mediaDropTargetId === folder.id 
+                                    ? 'bg-blue-50 scale-[1.02] ring-2 ring-blue-400 rounded-lg z-10' 
+                                    : ''
+                            } ${
                                 dropIndex === index && dragIndex !== null && dragIndex !== index
                                     ? dragIndex < index
                                         ? 'after:absolute after:bottom-0 after:left-2 after:right-2 after:h-0.5 after:bg-blue-500 after:rounded-full'
@@ -234,6 +286,7 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                                     : ''
                             }`}
                         >
+
                             {renamingId === folder.id ? (
                                 /* Inline rename input */
                                 <div className="flex items-center gap-2 px-4 py-2">
@@ -259,12 +312,15 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                                     to={`/folders/${folder.id}`}
                                     onClick={onMobileClose}
                                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors group cursor-pointer ${
-                                        isFolderActive(folder.id)
-                                            ? 'bg-amber-50 text-amber-700'
-                                            : 'text-gray-600 hover:bg-gray-100'
+                                        mediaDropTargetId === folder.id
+                                            ? 'text-blue-700 bg-blue-50/50'
+                                            : isFolderActive(folder.id)
+                                                ? 'bg-amber-50 text-amber-700'
+                                                : 'text-gray-600 hover:bg-gray-100'
                                     } ${dragIndex === index ? 'opacity-50' : ''}`}
                                     onDoubleClick={(e) => startRename(e, folder)}
                                 >
+
                                     {/* Drag handle */}
                                     <svg 
                                         className="w-3 h-3 flex-shrink-0 text-gray-300 cursor-grab active:cursor-grabbing hover:text-gray-500" 
@@ -282,12 +338,20 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                                     </svg>
                                     <span className="truncate flex-1 text-left">{folder.name}</span>
-                                    <span className="text-[10px] text-gray-400 flex-shrink-0">{folder.item_count}</span>
+                                    {dropSuccessId === folder.id ? (
+                                        <svg className="w-4 h-4 text-green-500 animate-in zoom-in duration-300" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                        </svg>
+                                    ) : (
+                                        <span className="text-[10px] text-gray-400 flex-shrink-0">{folder.item_count}</span>
+                                    )}
                                     <button
-                                        onClick={(e) => handleDeleteFolder(e, folder.id)}
+
+                                        onClick={(e) => handleDeleteFolder(e, folder)}
                                         className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 hover:text-red-600 transition-all flex-shrink-0"
                                         title="Delete folder"
                                     >
+
                                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                                         </svg>
@@ -324,6 +388,18 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
             </nav>
 
             <LibraryInfo refreshKey={refreshKey} />
+
+            <ConfirmDialog
+                isOpen={!!folderToDelete}
+                title="Delete Folder?"
+                message={`Are you sure you want to delete the folder "${folderToDelete?.name}"? The media items inside will not be deleted.`}
+                confirmLabel="Delete"
+                cancelLabel="Cancel"
+                isDestructive={true}
+                onConfirm={confirmDeleteFolder}
+                onCancel={() => setFolderToDelete(null)}
+            />
         </aside>
+
     );
 }

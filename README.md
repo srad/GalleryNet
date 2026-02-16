@@ -34,13 +34,11 @@
 
 ---
 
-<!--
 <p align="center">
-  <img src="docs/screenshot.png" alt="GalleryNet Screenshot" width="900" />
+  <img alt="GalleryNet Screenshot" width="900" alt="screenshot_1" src="https://github.com/user-attachments/assets/72613ee9-ab24-4d23-94f3-9b13a6fa4836" />
 </p>
 
 ---
--->
 
 ## Highlights
 

@@ -31,7 +31,8 @@
 </p>
 
 <p align="center">
-  Upload photos and videos, organize them into folders and use integrated AI tools for search and sorting &mdash; all running on your own hardware. No cloud, no API keys, fully private. High-performance, low resource usage, and only a single container without any other dependencies.
+  Upload photos and videos, organize them into folders and use integrated AI tools for search and sorting &mdash; all running on your own hardware.
+  No cloud, no API keys, fully private. High-performance, low resource usage, and only a single container without any other dependencies.
 </p>
 
 ---

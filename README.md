@@ -252,7 +252,6 @@ src/
 | `POST` | `/api/tags/learn` | Train model from manual tags. Body: `{"tag_name": "..."}` |
 | `POST` | `/api/tags/auto-tag` | Apply all trained models to current scope |
 | `GET` | `/api/folders` | List all folders with item counts |
-
 | `POST` | `/api/folders` | Create folder. Body: `{"name": "..."}` |
 | `DELETE` | `/api/folders/{id}` | Delete folder (keeps media files) |
 | `GET` | `/api/folders/{id}/media` | Paginated media in folder |

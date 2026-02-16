@@ -157,7 +157,7 @@ services:
       - DATABASE_PATH=/app/data/gallery.db
       - UPLOAD_DIR=/app/data/uploads
       - THUMBNAIL_DIR=/app/data/thumbnails
-      # - GALLERY_PASSWORD=your-secret-password
+      - GALLERY_PASSWORD=your-secret-password
     volumes:
       - ./data:/app/data
     restart: unless-stopped

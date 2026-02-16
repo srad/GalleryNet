@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MediaItem } from '../types';
 import { apiFetch } from '../auth';
-import { HeartIcon, TagIcon } from './Icons';
+import { HeartIcon, TagIcon, SearchIcon } from './Icons';
 import TagInput from './TagInput';
+import ConfirmDialog from './ConfirmDialog';
 
 interface MediaModalProps {
     item: MediaItem;
@@ -11,6 +12,7 @@ interface MediaModalProps {
     onNext: (() => void) | null;
     onFindSimilar?: (id: string) => void;
     onToggleFavorite: () => void;
+    onDelete: () => void;
     onTagsChanged?: () => void;
 }
 
@@ -35,7 +37,7 @@ function formatDate(dateStr: string): string {
     return d.toLocaleString();
 }
 
-export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimilar, onToggleFavorite, onTagsChanged }: MediaModalProps) {
+export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimilar, onToggleFavorite, onDelete, onTagsChanged }: MediaModalProps) {
 
     const backdropRef = useRef<HTMLDivElement>(null);
     const video = isVideo(item.filename);
@@ -43,6 +45,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
 
     const [detail, setDetail] = useState<MediaItem | null>(null);
     const [exifOpen, setExifOpen] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     // Fetch full details (including exif_json) when item changes
     useEffect(() => {
@@ -59,7 +62,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
     }, [item.id]);
 
     // Use fetched detail for fields when available, fallback to the summary item
-    const displayItem = detail || item;
+    const displayItem = detail ? { ...detail, is_favorite: item.is_favorite } : item;
     const exifData: Record<string, string> | null = (() => {
         if (!detail?.exif_json) return null;
         try {
@@ -139,6 +142,46 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
             onTouchEnd={handleTouchEnd}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
         >
+            {/* Mobile Toolbar */}
+            <div className="lg:hidden absolute top-3 left-3 z-50 flex flex-row gap-4">
+                {onToggleFavorite && (
+                    <button 
+                        onClick={onToggleFavorite} 
+                        className={`w-10 h-10 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-md transition-colors ${displayItem.is_favorite ? 'text-red-500 hover:text-red-400' : 'text-white/80 hover:text-white hover:bg-black/60'}`}
+                    >
+                        <HeartIcon solid={displayItem.is_favorite} className="w-6 h-6" />
+                    </button>
+                )}
+                {onFindSimilar && item.id && (
+                    <button 
+                        onClick={() => { if(item.id) { onFindSimilar(item.id); onClose(); } }} 
+                        className="w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 backdrop-blur-md transition-colors"
+                    >
+                        <SearchIcon className="w-6 h-6" />
+                    </button>
+                )}
+                <a 
+                    href={mediaUrl} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    className="w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 backdrop-blur-md transition-colors"
+                >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                    </svg>
+                </a>
+                {onDelete && (
+                    <button 
+                        onClick={() => setShowDeleteConfirm(true)} 
+                        className="w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-red-200 hover:text-red-100 hover:bg-black/60 backdrop-blur-md transition-colors"
+                    >
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                        </svg>
+                    </button>
+                )}
+            </div>
+
             {/* Close button */}
             <button
                 onClick={onClose}
@@ -176,30 +219,29 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
             {/* Content area */}
             <div className="flex flex-col lg:flex-row max-w-[98vw] max-h-[96vh] gap-3 px-2 sm:px-6 lg:px-12">
                 {/* Media display */}
-                <div className="flex items-center justify-center min-w-0 flex-1">
+                <div className="relative flex items-center justify-center min-w-0 flex-1">
+
                     {video ? (
                         <video
                             key={item.filename}
                             src={mediaUrl}
                             controls
                             autoPlay
-                            className="max-w-full max-h-[60vh] lg:max-h-[94vh] rounded-lg shadow-2xl"
+                            className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl"
                         />
                     ) : (
                         <img
                             key={item.filename}
                             src={mediaUrl}
                             alt={item.original_filename || item.filename}
-                            className="max-w-full max-h-[60vh] lg:max-h-[94vh] rounded-lg shadow-2xl object-contain"
+                            className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl object-contain"
                         />
                     )}
                 </div>
 
                 {/* Details panel */}
-                <div className="w-full lg:w-72 flex-shrink-0 bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 text-white overflow-y-auto max-h-[30vh] lg:max-h-[94vh]">
-                    <h3 className="text-sm font-semibold text-white/90 mb-4 break-words" title={displayItem.original_filename || displayItem.filename}>
-                        {displayItem.original_filename || displayItem.filename}
-                    </h3>
+                <div className="hidden lg:block w-72 flex-shrink-0 bg-white/10 backdrop-blur-md rounded-xl p-4 text-white overflow-y-auto max-h-[94vh]">
+
 
                     <div className="mb-4">
                         <div className="flex items-center gap-2 mb-1.5 text-xs font-semibold text-white/50 uppercase tracking-wider">
@@ -313,6 +355,19 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                             </button>
                         )}
 
+                        {/* Delete Button */}
+                        {onDelete && (
+                            <button
+                                onClick={() => setShowDeleteConfirm(true)}
+                                className="flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium rounded-lg bg-red-500/20 text-red-200 hover:bg-red-500/30 hover:text-white transition-colors border border-red-500/30"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                </svg>
+                                Delete
+                            </button>
+                        )}
+
                         {/* Open original link */}
                         <a
                             href={mediaUrl}
@@ -328,6 +383,19 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                     </div>
                 </div>
             </div>
+            <ConfirmDialog
+                isOpen={showDeleteConfirm}
+                title="Delete Media"
+                message="Are you sure you want to delete this item? This cannot be undone."
+                confirmLabel="Delete"
+                cancelLabel="Cancel"
+                isDestructive={true}
+                onConfirm={() => {
+                    onDelete();
+                    setShowDeleteConfirm(false);
+                }}
+                onCancel={() => setShowDeleteConfirm(false)}
+            />
         </div>
     );
 }

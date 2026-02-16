@@ -269,3 +269,4 @@ External: `ffmpeg` (video frame extraction).
 - Disk space detection is platform-conditional: `GetDiskFreeSpaceExW` on Windows, `libc::statvfs` on Linux/macOS
 - App version is read from `Cargo.toml` at compile time via `env!("CARGO_PKG_VERSION")`
 - The ONNX model must be re-exported if changing the feature extraction architecture (see `scripts/mobilenetv3_export.py`, requires Python with `torch`, `timm`, `onnx`)
+- **Dialogs**: Always use `ConfirmDialog.tsx` for confirmations (delete, destructive actions) and `AlertDialog.tsx` for alerts/notifications. Avoid using the native `window.alert` or `window.confirm`.

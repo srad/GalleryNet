@@ -119,9 +119,7 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
             )}
             {/* Overlay gradient on hover */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 flex flex-col justify-end p-2 gap-1.5">
-                <p className="text-white text-[10px] font-medium truncate leading-tight mb-0.5 px-0.5">
-                    {item.original_filename || item.filename}
-                </p>
+
                 
                 {/* Badges container */}
                 <div className="flex flex-wrap gap-1 items-end">

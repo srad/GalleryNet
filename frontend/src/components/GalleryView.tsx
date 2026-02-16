@@ -754,6 +754,26 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
     }, [selected, media, exitSelectionMode, folderId, onFoldersChanged]);
 
+    const handleSingleDelete = useCallback(async (item: MediaItem) => {
+        if (!item.id) return;
+        setIsDeleting(true);
+        try {
+            const res = await apiFetch(`/api/media/${item.id}`, {
+                method: 'DELETE',
+            });
+
+            if (res.ok) {
+                setMedia(prev => prev.filter(m => m.id !== item.id));
+                setSelectedFilename(null);
+                if (folderId) onFoldersChanged();
+            }
+        } catch (e) {
+            console.error('Delete error:', e);
+        } finally {
+            setIsDeleting(false);
+        }
+    }, [folderId, onFoldersChanged]);
+
     // --- Remove from folder (when viewing a folder) ---
     const handleRemoveFromFolder = useCallback(async () => {
         if (selected.size === 0 || !folderId) return;
@@ -1730,6 +1750,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         onNext={nextItem ? () => setSelectedFilename(nextItem!.filename) : null}
                         onFindSimilar={onFindSimilar}
                         onToggleFavorite={() => handleToggleFavorite(item!)}
+                        onDelete={() => handleSingleDelete(item!)}
                         onTagsChanged={onUploadComplete}
                     />
                 );

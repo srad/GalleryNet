@@ -5,16 +5,17 @@ import MediaCard from './MediaCard';
 import MediaModal from './MediaModal';
 import { apiFetch } from '../auth';
 import { LibraryPicker } from './GalleryView';
-import { PhotoIcon } from './Icons';
+import { PhotoIcon, LogoutIcon } from './Icons';
 import LoadingIndicator from './LoadingIndicator';
 
 interface SearchViewProps {
     folders: Folder[];
     refreshKey: number;
     onFoldersChanged: () => void;
+    onLogout?: () => void;
 }
 
-export default function SearchView({ folders, refreshKey, onFoldersChanged }: SearchViewProps) {
+export default function SearchView({ folders, refreshKey, onFoldersChanged, onLogout }: SearchViewProps) {
     const [searchParams, setSearchParams] = useSearchParams();
     const sourceId = searchParams.get('source');
     const selectedMediaId = searchParams.get('media');
@@ -211,7 +212,18 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged }: Se
 
     return (
         <div className="max-w-7xl mx-auto h-full flex flex-col">
-            <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-4 md:mb-6 shrink-0">Visual Search</h2>
+            <div className="flex items-center justify-between mb-4 md:mb-6 shrink-0">
+                <h2 className="text-2xl md:text-3xl font-bold text-gray-900 truncate">Visual Search</h2>
+                {onLogout && (
+                    <button
+                        onClick={onLogout}
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-gray-500 hover:text-gray-900 hover:bg-white/50 rounded-xl transition-all active:scale-95 border border-transparent hover:border-gray-200"
+                        title="Log out"
+                    >
+                        <LogoutIcon />
+                    </button>
+                )}
+            </div>
 
             <div className="bg-white border border-gray-200 p-4 sm:p-6 md:p-8 rounded-2xl shadow-sm mb-4 sm:mb-8 shrink-0">
                 <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 items-start lg:items-center">

@@ -156,7 +156,7 @@ export default function App() {
             </div>
 
             {/* Main content area */}
-            <div className="flex flex-1 overflow-hidden">
+            <div className="flex flex-1 overflow-hidden relative">
                 {/* Sidebar backdrop (mobile only) */}
                 {sidebarOpen && (
                     <div
@@ -167,7 +167,6 @@ export default function App() {
 
                 <Sidebar
                     refreshKey={refreshKey}
-                    onLogout={authRequired ? handleLogout : undefined}
                     folders={folders}
                     onFoldersChanged={fetchFolders}
                     disabled={isBusy}
@@ -186,6 +185,7 @@ export default function App() {
                             onUploadComplete={handleUploadComplete}
                             onBusyChange={setIsBusy}
                             onFindSimilar={handleFindSimilar}
+                            onLogout={authRequired ? handleLogout : undefined}
                         />
                     </div>
 
@@ -200,6 +200,7 @@ export default function App() {
                             onBusyChange={setIsBusy}
                             onFindSimilar={handleFindSimilar}
                             favoritesOnly={true}
+                            onLogout={authRequired ? handleLogout : undefined}
                         />
                     </div>
 
@@ -208,6 +209,7 @@ export default function App() {
                             folders={folders} 
                             refreshKey={refreshKey} 
                             onFoldersChanged={fetchFolders}
+                            onLogout={authRequired ? handleLogout : undefined}
                         />
                     </div>
 
@@ -225,6 +227,7 @@ export default function App() {
                             onUploadComplete={handleUploadComplete}
                             onBusyChange={setIsBusy}
                             onFindSimilar={handleFindSimilar}
+                            onLogout={authRequired ? handleLogout : undefined}
                         />
                     )}
                 </main>

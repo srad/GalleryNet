@@ -1,12 +1,12 @@
-import {useState, useEffect, useCallback, useRef} from 'react';
+import {useState, useCallback, useRef} from 'react';
 import {Link, useLocation} from 'react-router-dom';
 import {PhotoIcon, SearchIcon, HeartIcon} from './Icons';
 import type {Folder} from '../types';
 import {apiFetch} from '../auth';
+import LibraryInfo from './LibraryInfo';
 
 interface SidebarProps {
     refreshKey: number;
-    onLogout?: () => void;
     folders: Folder[];
     onFoldersChanged: () => void;
     /** When true, all navigation is disabled (e.g. during group computation) */
@@ -17,27 +17,8 @@ interface SidebarProps {
     onMobileClose?: () => void;
 }
 
-interface Stats {
-    version: string;
-    total_files: number;
-    total_images: number;
-    total_videos: number;
-    total_size_bytes: number;
-    disk_free_bytes: number;
-    disk_total_bytes: number;
-}
-
-function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    const val = bytes / Math.pow(1024, i);
-    return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
-}
-
-export default function Sidebar({refreshKey, onLogout, folders, onFoldersChanged, disabled, mobileOpen, onMobileClose}: SidebarProps) {
+export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled, mobileOpen, onMobileClose}: SidebarProps) {
     const location = useLocation();
-    const [stats, setStats] = useState<Stats | null>(null);
     const [newFolderName, setNewFolderName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
 
@@ -50,18 +31,6 @@ export default function Sidebar({refreshKey, onLogout, folders, onFoldersChanged
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [dropIndex, setDropIndex] = useState<number | null>(null);
     const dragCounterRef = useRef(0);
-
-    const fetchStats = useCallback(async () => {
-        try {
-            const res = await apiFetch('/api/stats');
-            if (res.ok) setStats(await res.json());
-        } catch { /* ignore */
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchStats();
-    }, [fetchStats, refreshKey]);
 
     const handleCreateFolder = useCallback(async () => {
         const name = newFolderName.trim();
@@ -189,10 +158,6 @@ export default function Sidebar({refreshKey, onLogout, folders, onFoldersChanged
         } catch { /* ignore */ }
     }, [dragIndex, folders, onFoldersChanged]);
 
-    const diskUsedPercent = stats && stats.disk_total_bytes > 0
-        ? Math.round(((stats.disk_total_bytes - stats.disk_free_bytes) / stats.disk_total_bytes) * 100)
-        : 0;
-
     const isActive = (path: string) => {
         if (path === '/') return location.pathname === '/';
         return location.pathname.startsWith(path);
@@ -202,7 +167,7 @@ export default function Sidebar({refreshKey, onLogout, folders, onFoldersChanged
 
     return (
         <aside className={`
-            fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0
+            fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 flex flex-col flex-shrink-0
             transition-transform duration-200 ease-in-out
             md:relative md:z-auto md:translate-x-0
             ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -212,9 +177,6 @@ export default function Sidebar({refreshKey, onLogout, folders, onFoldersChanged
                     <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
                         GalleryNet
                     </h1>
-                    {stats && (
-                        <p className="text-[10px] text-gray-400 mt-0.5">v{stats.version}</p>
-                    )}
                 </div>
                 {/* Close button (mobile only) */}
                 <button
@@ -361,68 +323,7 @@ export default function Sidebar({refreshKey, onLogout, folders, onFoldersChanged
                 </div>
             </nav>
 
-            {/* Stats panel */}
-            {stats && (
-                <div className="px-4 pb-4 space-y-3">
-                    <div className="bg-gray-50 rounded-xl p-3 space-y-2.5">
-                        <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Library</p>
-
-                        <div className="grid grid-cols-3 gap-1 text-center">
-                            <div>
-                                <p className="text-lg font-bold text-gray-900 leading-tight">{stats.total_files}</p>
-                                <p className="text-[10px] text-gray-400">Total</p>
-                            </div>
-                            <div>
-                                <p className="text-lg font-bold text-blue-600 leading-tight">{stats.total_images}</p>
-                                <p className="text-[10px] text-gray-400">Photos</p>
-                            </div>
-                            <div>
-                                <p className="text-lg font-bold text-purple-600 leading-tight">{stats.total_videos}</p>
-                                <p className="text-[10px] text-gray-400">Videos</p>
-                            </div>
-                        </div>
-
-                        <div className="border-t border-gray-200 pt-2">
-                            <div className="flex justify-between text-[11px] text-gray-500 mb-1">
-                                <span>Storage used</span>
-                                <span>{formatBytes(stats.total_size_bytes)}</span>
-                            </div>
-                        </div>
-
-                        <div>
-                            <div className="flex justify-between text-[11px] text-gray-500 mb-1">
-                                <span>Disk</span>
-                                <span>{formatBytes(stats.disk_free_bytes)} free</span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                                <div
-                                    className={`h-1.5 rounded-full transition-all ${
-                                        diskUsedPercent > 90 ? 'bg-red-500' : diskUsedPercent > 70 ? 'bg-amber-500' : 'bg-green-500'
-                                    }`}
-                                    style={{width: `${diskUsedPercent}%`}}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Logout */}
-            {onLogout && (
-                <div className="px-4 pb-4">
-                    <button
-                        onClick={onLogout}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5}
-                             stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round"
-                                  d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
-                        </svg>
-                        Log out
-                    </button>
-                </div>
-            )}
+            <LibraryInfo refreshKey={refreshKey} />
         </aside>
     );
 }

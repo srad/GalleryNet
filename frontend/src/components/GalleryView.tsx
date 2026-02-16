@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import type { MediaItem, MediaFilter, Folder, MediaGroup } from '../types';
-import { PhotoIcon, UploadIcon, PlusIcon, HeartIcon, TagIcon } from './Icons';
+import { PhotoIcon, UploadIcon, PlusIcon, HeartIcon, TagIcon, LogoutIcon } from './Icons';
 import MediaCard from './MediaCard';
 import MediaModal from './MediaModal';
 import TagFilter from './TagFilter';
@@ -74,6 +74,7 @@ interface GalleryViewProps {
     onFindSimilar?: (id: string) => void;
     favoritesOnly?: boolean;
     singleSelect?: boolean;
+    onLogout?: () => void;
 }
 
 type SortOrder = 'desc' | 'asc';
@@ -94,7 +95,7 @@ const FILTERS: { value: MediaFilter; label: string }[] = [
     { value: 'video', label: 'Videos' },
 ];
 
-export default function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar, favoritesOnly, singleSelect }: GalleryViewProps) {
+export default function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar, favoritesOnly, singleSelect, onLogout }: GalleryViewProps) {
     const { folderId: routeFolderId } = useParams();
     const [searchParams, setSearchParams] = useSearchParams();
     const activeFolderId = folderId || routeFolderId;
@@ -1204,31 +1205,43 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
                         <div className="w-px h-6 bg-gray-200 mx-1 hidden sm:block"></div>
 
-                        {/* 2. Upload Button (Primary) */}
+                        {/* 2. Upload & Logout (Primary Actions) */}
                         {!isPicker && (
-                            <div className="relative">
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    disabled={uploadState?.active || isBusy}
-                                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gray-900 rounded-xl shadow-sm hover:bg-gray-800 hover:shadow-md active:scale-95 transition-all disabled:opacity-70 disabled:pointer-events-none disabled:active:scale-100"
-                                    title={activeFolderId ? "Upload files to this folder" : "Upload media"}
-                                >
-                                    <UploadIcon />
-                                    <span className="hidden sm:inline">Upload</span>
-                                </button>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept="image/*,video/*"
-                                    multiple
-                                    className="hidden"
-                                    onChange={(e) => {
-                                        if (e.target.files && e.target.files.length > 0) {
-                                            handleUpload(e.target.files);
-                                            e.target.value = '';
-                                        }
-                                    }}
-                                />
+                            <div className="flex items-center gap-2">
+                                <div className="relative">
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={uploadState?.active || isBusy}
+                                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gray-900 rounded-xl shadow-sm hover:bg-gray-800 hover:shadow-md active:scale-95 transition-all disabled:opacity-70 disabled:pointer-events-none disabled:active:scale-100"
+                                        title={activeFolderId ? "Upload files to this folder" : "Upload media"}
+                                    >
+                                        <UploadIcon />
+                                        <span className="hidden sm:inline">Upload</span>
+                                    </button>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*,video/*"
+                                        multiple
+                                        className="hidden"
+                                        onChange={(e) => {
+                                            if (e.target.files && e.target.files.length > 0) {
+                                                handleUpload(e.target.files);
+                                                e.target.value = '';
+                                            }
+                                        }}
+                                    />
+                                </div>
+
+                                {onLogout && (
+                                    <button
+                                        onClick={onLogout}
+                                        className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-xl transition-all active:scale-95"
+                                        title="Log out"
+                                    >
+                                        <LogoutIcon />
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>

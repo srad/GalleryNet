@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import type { MediaItem, Folder } from '../types';
 import MediaCard from './MediaCard';
 import MediaModal from './MediaModal';
-import { apiFetch } from '../auth';
+import { apiClient } from '../api';
+
 import { LibraryPicker } from './GalleryView';
 import { PhotoIcon, LogoutIcon } from './Icons';
 import LoadingIndicator from './LoadingIndicator';
@@ -36,11 +37,8 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
     const handleSearchById = useCallback(async (id: string, sim: number) => {
         setIsSearching(true);
         try {
-            const res = await apiFetch(`/api/media/${id}/similar?similarity=${sim}`);
-            if (res.ok) {
-                const results = await res.json();
-                setSearchResults(results);
-            }
+            const results = await apiClient.searchSimilarById(id, sim);
+            setSearchResults(results);
         } catch (e) {
             console.error(e);
             alert('Search failed');
@@ -51,22 +49,16 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
 
     const handleSearchByFile = useCallback(async (file: File, sim: number) => {
         setIsSearching(true);
-        const formData = new FormData();
-        formData.append('similarity', sim.toString());
-        formData.append('file', file);
-
         try {
-            const res = await apiFetch('/api/search', { method: 'POST', body: formData });
-            if (res.ok) {
-                const results = await res.json();
-                setSearchResults(results);
-            }
+            const results = await apiClient.searchSimilarByFile(file, sim);
+            setSearchResults(results);
         } catch (e) {
             alert(`Search error: ${e}`);
         } finally {
             setIsSearching(false);
         }
     }, []);
+
 
     // Sync local slider state when URL param changes (e.g. back/forward navigation)
     useEffect(() => {
@@ -205,16 +197,19 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                 onPrev={prevItem?.id ? () => handleSetMediaId(prevItem!.id!) : null}
                 onNext={nextItem?.id ? () => handleSetMediaId(nextItem!.id!) : null}
                 onFindSimilar={handleFindSimilar}
-                onToggleFavorite={() => {
+                onToggleFavorite={async () => {
                     if (!item.id) return;
                     const newStatus = !item.is_favorite;
                     setSearchResults(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: newStatus } : m));
-                    apiFetch(`/api/media/${item.id}/favorite`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ favorite: newStatus }),
-                    }).catch(e => console.error(e));
+                    try {
+                        await apiClient.toggleFavorite(item.id, newStatus);
+                    } catch (e) {
+                        console.error(e);
+                        // Revert on error
+                        setSearchResults(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: !newStatus } : m));
+                    }
                 }}
+
             />
         );
     };

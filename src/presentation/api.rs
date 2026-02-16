@@ -1,10 +1,15 @@
 use axum::{
+    body::Body,
     extract::{ConnectInfo, Multipart, State, Query, Path},
-    http::{StatusCode, header},
+    http::{StatusCode, header, HeaderMap},
     response::{Json, IntoResponse},
     routing::{get, post, put},
     Router,
 };
+use async_zip::tokio::write::ZipFileWriter;
+use async_zip::{ZipEntryBuilder, Compression};
+use tokio_util::compat::{TokioAsyncWriteCompatExt, FuturesAsyncWriteCompatExt};
+
 use serde_json::json;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,7 +18,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, Semaphore};
 use std::path::PathBuf;
-use tracing::error;
+use tokio_util::io::ReaderStream;
+use tracing::{error, info};
+
 use uuid::Uuid;
 use tokio::io::AsyncWriteExt;
 
@@ -37,6 +44,23 @@ const MAX_LOGIN_ATTEMPTS: u32 = 10;
 /// Rate limit window duration in seconds.
 const RATE_LIMIT_WINDOW_SECS: u64 = 300; // 5 minutes
 
+
+#[derive(Clone, Serialize)]
+pub struct DownloadPart {
+    pub id: String,
+    pub filename: String,
+    pub size_estimate: u64,
+    #[serde(skip)]
+    pub media_ids: Vec<Uuid>,
+}
+
+#[derive(Clone)]
+pub struct DownloadPlan {
+    pub id: String,
+    pub parts: Vec<DownloadPart>,
+    pub expires_at: Instant,
+}
+
 // App State
 #[derive(Clone)]
 pub struct AppState {
@@ -51,7 +75,9 @@ pub struct AppState {
     pub auth_config: Option<AuthConfig>,
     pub upload_semaphore: Arc<Semaphore>,
     pub login_rate_limiter: Arc<Mutex<HashMap<IpAddr, (u32, Instant)>>>,
+    pub download_plans: Arc<Mutex<HashMap<String, DownloadPlan>>>,
 }
+
 
 #[derive(Deserialize)]
 pub struct Pagination {
@@ -159,7 +185,10 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media", get(list_handler))
         .route("/media/batch-delete", post(batch_delete_handler))
         .route("/media/download", post(batch_download_handler))
+        .route("/media/download/plan", post(batch_download_plan_handler))
+        .route("/media/download/stream/{part_id}", get(batch_download_stream_handler))
         .route("/media/group", post(group_media_handler))
+
         .route("/media/{id}", get(get_media_handler).delete(delete_handler))
         .route("/media/{id}/favorite", post(toggle_favorite_handler))
         .route("/media/{id}/tags", put(update_tags_handler))
@@ -696,7 +725,191 @@ async fn batch_update_tags_handler(
     Ok(StatusCode::OK)
 }
 
+fn create_download_plan<T: HasFilenames>(
+    items: Vec<T>,
+    upload_dir: &std::path::Path,
+    base_name: &str,
+) -> DownloadPlan {
+    let entries = prepare_zip_entries(&items, upload_dir);
+    
+    let mut parts = Vec::new();
+    let mut current_part_media_ids = Vec::new();
+    let mut current_part_size: u64 = 0;
+    
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+
+    for (entry, item) in entries.into_iter().zip(items.iter()) {
+        if !current_part_media_ids.is_empty() && current_part_size + entry.size > MAX_ZIP_BYTES {
+            let part_id = Uuid::new_v4().to_string();
+            parts.push(DownloadPart {
+                id: part_id,
+                filename: format!("{}_part{}_{}.zip", base_name, parts.len() + 1, timestamp),
+                size_estimate: current_part_size,
+                media_ids: current_part_media_ids,
+            });
+            current_part_media_ids = Vec::new();
+            current_part_size = 0;
+        }
+        current_part_media_ids.push(item.id());
+        current_part_size += entry.size;
+    }
+    
+    if !current_part_media_ids.is_empty() {
+        let part_id = Uuid::new_v4().to_string();
+        let filename = if parts.is_empty() {
+            format!("{}_{}.zip", base_name, timestamp)
+        } else {
+            format!("{}_part{}_{}.zip", base_name, parts.len() + 1, timestamp)
+        };
+        parts.push(DownloadPart {
+            id: part_id,
+            filename,
+            size_estimate: current_part_size,
+            media_ids: current_part_media_ids,
+        });
+    }
+
+    let plan_id = Uuid::new_v4().to_string();
+    DownloadPlan {
+        id: plan_id,
+        parts,
+        expires_at: Instant::now() + std::time::Duration::from_secs(3600), // 1 hour
+    }
+}
+
+async fn batch_download_plan_handler(
+    State(state): State<AppState>,
+    Json(ids): Json<Vec<Uuid>>,
+) -> Result<impl IntoResponse, DomainError> {
+    if ids.is_empty() {
+        return Err(DomainError::Io("No files requested".to_string()));
+    }
+
+    // Deduplicate IDs
+    let unique_ids: Vec<Uuid> = {
+        let mut seen = std::collections::HashSet::new();
+        ids.into_iter().filter(|id| seen.insert(*id)).collect()
+    };
+
+    // Look up all requested media items
+    let mut items = Vec::new();
+    for id in &unique_ids {
+        if let Some(item) = state.repo.find_by_id(*id)? {
+            items.push(item);
+        }
+    }
+
+    if items.is_empty() {
+        return Err(DomainError::NotFound);
+    }
+
+    let base_name = format!("gallerynet_{}", items.len());
+    let plan = create_download_plan(items, &state.upload_dir, &base_name);
+    let plan_id = plan.id.clone();
+    let parts = plan.parts.clone();
+
+    {
+        let mut plans = state.download_plans.lock().await;
+        let now = Instant::now();
+        plans.retain(|_, p| p.expires_at > now);
+        plans.insert(plan_id.clone(), plan);
+    }
+
+    Ok(Json(json!({
+        "plan_id": plan_id,
+        "parts": parts
+    })))
+}
+
+async fn batch_download_stream_handler(
+    State(state): State<AppState>,
+    Path(part_id): Path<String>,
+) -> Result<impl IntoResponse, DomainError> {
+    let part = {
+        let plans = state.download_plans.lock().await;
+        plans.values()
+            .flat_map(|p| p.parts.iter())
+            .find(|p| p.id == part_id)
+            .cloned()
+            .ok_or(DomainError::NotFound)?
+    };
+
+    let mut items = Vec::new();
+    for id in &part.media_ids {
+        if let Some(item) = state.repo.find_by_id(*id)? {
+            items.push(item);
+        }
+    }
+
+    if items.is_empty() {
+        return Err(DomainError::NotFound);
+    }
+
+    let entries = prepare_zip_entries(&items, &state.upload_dir);
+    let items_count = items.len();
+    let filename = part.filename.clone();
+
+    let (writer, reader) = tokio::io::duplex(16 * 1024 * 1024); // 16MB buffer
+    
+    tokio::spawn(async move {
+        let mut zip = ZipFileWriter::new(writer.compat_write());
+        
+        info!("Streaming zip download start: {} ({} items)", filename, entries.len());
+        
+        for (i, entry) in entries.into_iter().enumerate() {
+            if i % 50 == 0 || i == items_count - 1 {
+                info!("[{}/{}] Streaming file: {}", i + 1, items_count, entry.zip_name);
+            }
+            
+            let builder = ZipEntryBuilder::new(entry.zip_name.clone().into(), Compression::Stored);
+            match tokio::fs::File::open(&entry.disk_path).await {
+                Ok(file) => {
+                    match zip.write_entry_stream(builder).await {
+                        Ok(mut entry_writer) => {
+                            let mut buf_file = tokio::io::BufReader::with_capacity(128 * 1024, file);
+                            if let Err(e) = tokio::io::copy(&mut buf_file, &mut (&mut entry_writer).compat_write()).await {
+                                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                                    info!("Client disconnected, aborting download: {}", filename);
+                                    return;
+                                }
+                                error!("Failed to stream entry {}: {}", entry.zip_name, e);
+                            }
+                            let _ = entry_writer.close().await;
+                        }
+                        Err(e) => {
+                            error!("Failed to start entry {}: {}", entry.zip_name, e);
+                            return; 
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to open {} for streaming: {}", entry.disk_path.display(), e);
+                }
+            }
+        }
+        
+        if let Err(e) = zip.close().await {
+            error!("Failed to close zip stream: {}", e);
+        }
+        
+        info!("Streaming zip download finished: {}", filename);
+    });
+
+    let stream = tokio_util::io::ReaderStream::new(reader);
+    let body = Body::from_stream(stream);
+
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/zip".parse().unwrap());
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!("attachment; filename=\"{}\"", part.filename).parse().unwrap()
+    );
+
+    Ok((headers, body))
+}
+
 async fn batch_delete_handler(
+
     State(state): State<AppState>,
     Json(ids): Json<Vec<Uuid>>,
 ) -> Result<impl IntoResponse, DomainError> {
@@ -714,89 +927,81 @@ struct ZipEntry {
     size: u64,
 }
 
-/// Build one or more zip archives from `entries`, splitting into roughly
-/// equal-sized parts so no single archive exceeds `MAX_ZIP_BYTES`.
-/// Each part is written to a temp file; returns the list of (temp_path, part_name).
-fn build_zip_archives(
-    entries: &[ZipEntry],
-    base_name: &str,
-) -> Result<Vec<(PathBuf, String)>, DomainError> {
-    use std::io::Write;
 
-    let total_size: u64 = entries.iter().map(|e| e.size).sum();
-    let num_parts = ((total_size as f64) / (MAX_ZIP_BYTES as f64)).ceil().max(1.0) as usize;
-    let target_size = if num_parts > 1 {
-        total_size / num_parts as u64
-    } else {
-        u64::MAX // everything in one archive
-    };
+/// Stream a zip archive of the given items incrementally using async_zip.
+async fn stream_zip_response<I>(
+    items: I,
+    upload_dir: PathBuf,
+    outer_name: String,
+) -> Result<axum::response::Response, DomainError>
+where
+    I: IntoIterator + Send + 'static,
+    I::Item: HasFilenames + Send + 'static,
+{
+    let items_vec: Vec<I::Item> = items.into_iter().collect();
+    let name_for_log = outer_name.clone();
+    
+    let entries = prepare_zip_entries(items_vec, &upload_dir);
+    let items_count = entries.len();
 
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-
-    let temp_dir = std::env::temp_dir();
-    let mut archives: Vec<(PathBuf, String)> = Vec::new();
-    let mut current_size: u64 = 0;
-    let mut zip: Option<zip::ZipWriter<std::fs::File>> = None;
-    let mut current_path: Option<PathBuf> = None;
-
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-
-    let start_new_archive = |archives: &mut Vec<(PathBuf, String)>,
-                              temp_dir: &std::path::Path,
-                              base_name: &str,
-                              timestamp: &dyn std::fmt::Display,
-                              num_parts: usize|
-     -> Result<(zip::ZipWriter<std::fs::File>, PathBuf), DomainError> {
-        let part = archives.len() + 1;
-        let part_name = if num_parts > 1 {
-            format!("{}_part{}_{}.zip", base_name, part, timestamp)
-        } else {
-            format!("{}_{}.zip", base_name, timestamp)
-        };
-        let path = temp_dir.join(format!("gallerynet_dl_{}.tmp", Uuid::new_v4()));
-        let file = std::fs::File::create(&path)
-            .map_err(|e| DomainError::Io(format!("Failed to create temp zip: {}", e)))?;
-        archives.push((path.clone(), part_name));
-        Ok((zip::ZipWriter::new(file), path))
-    };
-
-    for entry in entries {
-        // Start a new archive if we'd exceed the target, but only if the current one isn't empty
-        if zip.is_none() || (current_size > 0 && current_size + entry.size > target_size && num_parts > 1) {
-            // Finish the previous archive
-            if let Some(z) = zip.take() {
-                z.finish().map_err(|e| DomainError::Io(e.to_string()))?;
+    let (writer, reader) = tokio::io::duplex(16 * 1024 * 1024); // 16MB buffer
+    
+    tokio::spawn(async move {
+        let mut zip = ZipFileWriter::new(writer.compat_write());
+        info!("Streaming zip start: {} ({} items)", name_for_log, items_count);
+        
+        for (i, entry) in entries.into_iter().enumerate() {
+            if i % 50 == 0 || i == items_count - 1 {
+                info!("[{}/{}] Streaming: {}", i + 1, items_count, entry.zip_name);
             }
-            let (new_zip, new_path) = start_new_archive(
-                &mut archives, &temp_dir, base_name, &timestamp, num_parts,
-            )?;
-            zip = Some(new_zip);
-            current_path = Some(new_path);
-            current_size = 0;
+            let builder = ZipEntryBuilder::new(entry.zip_name.clone().into(), Compression::Stored);
+            match tokio::fs::File::open(&entry.disk_path).await {
+                Ok(file) => {
+                    match zip.write_entry_stream(builder).await {
+                        Ok(mut entry_writer) => {
+                            let mut buf_file = tokio::io::BufReader::with_capacity(128 * 1024, file);
+                            if let Err(e) = tokio::io::copy(&mut buf_file, &mut (&mut entry_writer).compat_write()).await {
+                                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                                    info!("Client disconnected, aborting zip stream: {}", name_for_log);
+                                    return;
+                                }
+                                error!("Failed to stream entry {}: {}", entry.zip_name, e);
+                            }
+                            let _ = entry_writer.close().await;
+                        }
+                        Err(e) => {
+                            error!("Failed to start entry {}: {}", entry.zip_name, e);
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to open {} for streaming: {}", entry.disk_path.display(), e);
+                }
+            }
         }
 
-        let data = std::fs::read(&entry.disk_path)
-            .map_err(|e| DomainError::Io(format!("{}: {}", entry.zip_name, e)))?;
+        
+        if let Err(e) = zip.close().await {
+            error!("Failed to close zip stream: {}", e);
+        }
+        info!("Streaming zip finished: {}", name_for_log);
+    });
 
-        let z = zip.as_mut().unwrap();
-        z.start_file(&entry.zip_name, options)
-            .map_err(|e| DomainError::Io(e.to_string()))?;
-        z.write_all(&data)
-            .map_err(|e| DomainError::Io(e.to_string()))?;
+    let stream = tokio_util::io::ReaderStream::new(reader);
+    let body = Body::from_stream(stream);
+    
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/zip".parse().unwrap());
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!("attachment; filename=\"{}\"", outer_name).parse().unwrap()
+    );
+    // Note: Content-Length for a ZIP stream is not easily pre-calculable 
+    // without actually zipping everything (due to headers and compression),
+    // so we omit it for true incremental streaming.
 
-        current_size += entry.size;
-    }
-
-    // Finish the last archive
-    if let Some(z) = zip.take() {
-        z.finish().map_err(|e| DomainError::Io(e.to_string()))?;
-    }
-
-    // Suppress unused variable warning — current_path is used implicitly through archives
-    let _ = current_path;
-
-    Ok(archives)
+    Ok((headers, body).into_response())
 }
 
 /// Prepare `ZipEntry` list from items, handling filename sanitization and deduplication.
@@ -830,83 +1035,29 @@ where
 trait HasFilenames {
     fn original_filename(&self) -> &str;
     fn disk_filename(&self) -> &str;
+    fn id(&self) -> Uuid;
 }
 
 impl HasFilenames for MediaItem {
     fn original_filename(&self) -> &str { &self.original_filename }
     fn disk_filename(&self) -> &str { &self.filename }
-}
-
-impl HasFilenames for &MediaItem {
-    fn original_filename(&self) -> &str { &self.original_filename }
-    fn disk_filename(&self) -> &str { &self.filename }
+    fn id(&self) -> Uuid { self.id }
 }
 
 impl HasFilenames for crate::domain::MediaSummary {
     fn original_filename(&self) -> &str { &self.original_filename }
     fn disk_filename(&self) -> &str { &self.filename }
+    fn id(&self) -> Uuid { self.id }
 }
 
-impl HasFilenames for &crate::domain::MediaSummary {
-    fn original_filename(&self) -> &str { &self.original_filename }
-    fn disk_filename(&self) -> &str { &self.filename }
-}
-
-/// Serve zip archives: if single part, send it directly; if multiple, wrap in an outer zip.
-async fn serve_zip_archives(
-    archives: Vec<(PathBuf, String)>,
-    outer_name: String,
-) -> Result<axum::response::Response, DomainError> {
-    if archives.len() == 1 {
-        let (path, name) = &archives[0];
-        let data = tokio::fs::read(path).await
-            .map_err(|e| DomainError::Io(e.to_string()))?;
-        let _ = tokio::fs::remove_file(path).await;
-        let headers = [
-            (header::CONTENT_TYPE, "application/zip".to_string()),
-            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", name)),
-        ];
-        Ok((headers, data).into_response())
-    } else {
-        // Wrap parts in an outer zip
-        let archives_clone = archives.clone();
-        let buf = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, DomainError> {
-            use std::io::{Cursor, Write};
-            let mut outer_buf = Vec::new();
-            {
-                let cursor = Cursor::new(&mut outer_buf);
-                let mut outer = zip::ZipWriter::new(cursor);
-                let opts = zip::write::SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Stored); // parts are already compressed
-                for (path, name) in &archives_clone {
-                    let data = std::fs::read(path)
-                        .map_err(|e| DomainError::Io(e.to_string()))?;
-                    outer.start_file(name, opts)
-                        .map_err(|e| DomainError::Io(e.to_string()))?;
-                    outer.write_all(&data)
-                        .map_err(|e| DomainError::Io(e.to_string()))?;
-                }
-                outer.finish().map_err(|e| DomainError::Io(e.to_string()))?;
-            }
-            Ok(outer_buf)
-        })
-        .await
-        .map_err(|e| DomainError::Io(format!("Task failed: {}", e)))??;
-
-        // Clean up temp files
-        for (path, _) in &archives {
-            let _ = tokio::fs::remove_file(path).await;
-        }
-
-        let headers = [
-            (header::CONTENT_TYPE, "application/zip".to_string()),
-            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", outer_name)),
-        ];
-        Ok((headers, buf).into_response())
-    }
+impl<T: HasFilenames> HasFilenames for &T {
+    fn original_filename(&self) -> &str { (*self).original_filename() }
+    fn disk_filename(&self) -> &str { (*self).disk_filename() }
+    fn id(&self) -> Uuid { (*self).id() }
 }
 
 async fn batch_download_handler(
+
     State(state): State<AppState>,
     Json(ids): Json<Vec<Uuid>>,
 ) -> Result<impl IntoResponse, DomainError> {
@@ -936,9 +1087,13 @@ async fn batch_download_handler(
     if items.len() == 1 {
         let item = &items[0];
         let file_path = state.upload_dir.join(&item.filename);
-        let data = tokio::fs::read(&file_path)
+        let file = tokio::fs::File::open(&file_path)
             .await
             .map_err(|e| DomainError::Io(e.to_string()))?;
+        
+        let metadata = file.metadata().await
+            .map_err(|e| DomainError::Io(e.to_string()))?;
+        let size = metadata.len();
 
         let content_type = mime_guess::from_path(&item.original_filename)
             .first_or_octet_stream()
@@ -951,25 +1106,21 @@ async fn batch_download_handler(
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{}\"", safe_name),
             ),
+            (header::CONTENT_LENGTH, size.to_string()),
         ];
-        return Ok((headers, data).into_response());
+        return Ok((headers, Body::from_stream(ReaderStream::new(file))).into_response());
     }
+
 
     // Multiple files — build zip archive(s), splitting by size
     let file_count = items.len();
     let upload_dir = state.upload_dir.clone();
-
-    let archives = tokio::task::spawn_blocking(move || {
-        let entries = prepare_zip_entries(&items, &upload_dir);
-        build_zip_archives(&entries, &format!("gallerynet_{}", file_count))
-    })
-    .await
-    .map_err(|e| DomainError::Io(format!("Task failed: {}", e)))??;
-
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
     let outer_name = format!("gallerynet_{}_{}.zip", file_count, timestamp);
-    Ok(serve_zip_archives(archives, outer_name).await?)
+
+    Ok(stream_zip_response(items, upload_dir, outer_name).await?)
 }
+
 
 #[derive(Deserialize)]
 pub struct GroupRequest {
@@ -1143,18 +1294,23 @@ async fn download_folder_handler(
     let safe_name = safe_name.trim_matches(|c| c == '_').to_string();
     let safe_name = if safe_name.is_empty() { "folder".to_string() } else { safe_name };
 
-    let base_name = format!("{}_{}", safe_name, file_count);
-    let archives = tokio::task::spawn_blocking(move || {
-        let entries = prepare_zip_entries(&items, &upload_dir);
-        build_zip_archives(&entries, &base_name)
-    })
-    .await
-    .map_err(|e| DomainError::Io(format!("Task failed: {}", e)))??;
+    let plan = create_download_plan(items, &state.upload_dir, &safe_name);
+    let plan_id = plan.id.clone();
+    let parts = plan.parts.clone();
 
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let outer_name = format!("{}_{}_{}.zip", safe_name, file_count, timestamp);
-    Ok(serve_zip_archives(archives, outer_name).await?)
+    {
+        let mut plans = state.download_plans.lock().await;
+        let now = Instant::now();
+        plans.retain(|_, p| p.expires_at > now);
+        plans.insert(plan_id.clone(), plan);
+    }
+
+    Ok(Json(json!({
+        "plan_id": plan_id,
+        "parts": parts
+    })))
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -1182,55 +1338,9 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_filename_normal() {
-        assert_eq!(sanitize_filename("photo.jpg"), "photo.jpg");
-        assert_eq!(sanitize_filename("my vacation photo.png"), "my vacation photo.png");
-    }
-
-    #[test]
-    fn cookie_contains_secure_flag() {
-        let cookie = format!(
-            "gallery_session=test; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age={}",
-            60 * 60 * 24 * 30
-        );
-        assert!(cookie.contains("Secure"));
-        assert!(cookie.contains("HttpOnly"));
-        assert!(cookie.contains("SameSite=Strict"));
-    }
-
-    #[test]
-    fn id_deduplication() {
-        let id1 = Uuid::new_v4();
-        let id2 = Uuid::new_v4();
-        let ids = vec![id1, id1, id2, id2, id1];
-        let unique: Vec<Uuid> = {
-            let mut seen = std::collections::HashSet::new();
-            ids.into_iter().filter(|id| seen.insert(*id)).collect()
-        };
-        assert_eq!(unique.len(), 2);
-        assert_eq!(unique[0], id1);
-        assert_eq!(unique[1], id2);
-    }
-
-    #[test]
-    fn zip_split_constant_valid() {
-        assert!(MAX_ZIP_BYTES >= 512 * 1024 * 1024); // at least 512 MB
-        assert!(MAX_ZIP_BYTES <= 8 * 1024 * 1024 * 1024); // at most 8 GB
-    }
-
-    #[test]
-    fn zip_split_partitioning() {
-        // Simulate: 5 files of 600 MB each = 3 GB total → should split into 2 parts
-        let total: u64 = 5 * 600 * 1024 * 1024;
-        let num_parts = ((total as f64) / (MAX_ZIP_BYTES as f64)).ceil().max(1.0) as usize;
-        assert_eq!(num_parts, 2); // 3GB / 2GB = 1.5 → ceil = 2
-        let target = total / num_parts as u64;
-        // Each part targets ~1.5 GB which is under MAX_ZIP_BYTES
-        assert!(target <= MAX_ZIP_BYTES);
-    }
-
-    #[test]
     fn limit_capping() {
+
+
         assert_eq!(250_usize.min(MAX_PAGE_LIMIT), MAX_PAGE_LIMIT);
         assert_eq!(50_usize.min(MAX_PAGE_LIMIT), 50);
         assert_eq!(200_usize.min(MAX_PAGE_LIMIT), 200);

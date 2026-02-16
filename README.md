@@ -247,8 +247,11 @@ src/
 | `POST` | `/api/media/{id}/favorite` | Toggle favorite status. Body: `{"favorite": true/false}` |
 | `DELETE` | `/api/media/{id}` | Delete single media item |
 | `POST` | `/api/media/batch-delete` | Batch delete. Body: `["uuid1", ...]` |
-| `POST` | `/api/media/download` | Batch download as zip (auto-splits into parts for large sets). Body: `["uuid1", ...]` |
+| `POST` | `/api/media/download/plan` | Create download plan (partitions large sets into <2GB parts). Body: `["uuid1", ...]` |
+| `GET` | `/api/media/download/stream/{id}` | Stream a specific download part incrementally |
+| `POST` | `/api/media/download` | Simple batch download (if under 2GB). Body: `["uuid1", ...]` |
 | `GET` | `/api/tags` | List all unique tags |
+
 | `GET` | `/api/tags/count` | Count auto-tags in current view |
 | `POST` | `/api/tags/learn` | Train model from manual tags. Body: `{"tag_name": "..."}` |
 | `POST` | `/api/tags/auto-tag` | Apply all trained models to current scope |
@@ -258,7 +261,8 @@ src/
 | `GET` | `/api/folders/{id}/media` | Paginated media in folder |
 | `POST` | `/api/folders/{id}/media` | Add media to folder. Body: `["uuid1", ...]` |
 | `POST` | `/api/folders/{id}/media/remove` | Remove media from folder |
-| `GET` | `/api/folders/{id}/download` | Download all media in folder as zip (auto-splits for large folders) |
+| `GET` | `/api/folders/{id}/download` | Get download plan for folder (auto-splits for large folders) |
+
 | `GET` | `/api/stats` | Server statistics (counts, storage, disk space) |
 | `POST` | `/api/login` | Authenticate. Body: `{"password": "..."}` |
 | `POST` | `/api/logout` | Clear session |

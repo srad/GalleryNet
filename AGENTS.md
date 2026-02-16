@@ -28,8 +28,9 @@ src/
 │   ├── ort_processor.rs   # MobileNetV3 ONNX inference via ort crate (session pool)
 │   └── phash_generator.rs # Perceptual hashing for duplicate detection
 ├── presentation/    # HTTP layer
-│   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, batch-download, stats, login/logout, folders. Rate limiting, filename sanitization, error message sanitization, size-based zip splitting.
+│   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, batch-download (streaming), stats, login/logout, folders. Rate limiting, filename sanitization, error message sanitization, part-based zip splitting.
 │   └── auth.rs      # Authentication middleware, AuthConfig, HMAC token generation/verification, constant-time password comparison, session generation counter for invalidation
+
 └── main.rs          # Wiring, config, server startup
 
 frontend/src/
@@ -215,7 +216,10 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `GET /api/stats` — Server statistics: `{version, total_files, total_images, total_videos, total_size_bytes, disk_free_bytes, disk_total_bytes}`.
 - `DELETE /api/media/{id}` — Delete single media item. Returns 204 or 404.
 - `POST /api/media/batch-delete` — JSON body `["uuid1", "uuid2", ...]`. Returns `{"deleted": N}`. Deletes DB rows, embeddings, originals, and thumbnails.
-- `POST /api/media/download` — JSON body `["uuid1", "uuid2", ...]`. IDs are deduplicated. Single file returns the file directly with appropriate Content-Type. Multiple files returns a zip archive (`application/zip`). Large downloads (>2GB uncompressed) are automatically split into roughly equal-sized zip parts wrapped in an outer zip. Filenames are sanitized and deduplicated with `_N` suffix.
+- `POST /api/media/download/plan` — JSON body `["uuid1", "uuid2", ...]`. Returns `DownloadPlan` with part IDs and size estimates. Partitions large requests into parts under 2GB.
+- `GET /api/media/download/stream/{part_id}` — Incremental zip stream for a specific plan part. Uses `async_zip` for on-the-fly streaming with `Compression::Stored`.
+- `POST /api/media/download` — Legacy/simple batch download. Returns single zip stream if under 2GB.
+
 - `GET /api/folders` — List all folders with item counts, ordered by `sort_order`. Returns array of `{id, name, created_at, item_count, sort_order}`.
 - `POST /api/folders` — Create folder. JSON body `{"name":"..."}`. Returns created folder. New folders get `sort_order = max + 1`.
 - `PUT /api/folders/reorder` — Reorder folders. JSON body `["folder_uuid1", "folder_uuid2", ...]` (ordered array of folder IDs). Sets `sort_order` to array index. Returns 204.
@@ -223,7 +227,8 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `GET /api/folders/{id}/media?page=&limit=&media_type=&sort=` — Paginated media list within a folder. Same params as `/api/media`.
 - `POST /api/folders/{id}/media` — Add media to folder. JSON body `["uuid1","uuid2"]`. Uses `INSERT OR IGNORE` for idempotency.
 - `POST /api/folders/{id}/media/remove` — Remove media from folder. JSON body `{"media_ids":["uuid1"]}`.
-- `GET /api/folders/{id}/download` — Download all media in folder as zip. Large folders auto-split into multiple zip parts.
+- `GET /api/folders/{id}/download` — Returns `DownloadPlan` for all media in folder. Large folders auto-split into multiple zip parts.
+
 - `/uploads/*` and `/thumbnails/*` — Static file serving with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` headers.
 
 ## Frontend Architecture
@@ -246,7 +251,8 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 
 ## Dependencies
 
-Key crates: `axum` (HTTP), `ort` (ONNX Runtime), `rusqlite` + `sqlite-vec` (DB + vectors), `image` (processing), `image_hasher` (phash), `ndarray` (tensors), `linfa` + `linfa-svm` (SVM training & Platt scaling), `kamadak-exif` (EXIF parsing), `libc` (disk space on Linux), `zip` (batch download archive), `mime_guess` (content-type detection for downloads).
+Key crates: `axum` (HTTP), `ort` (ONNX Runtime), `rusqlite` + `sqlite-vec` (DB + vectors), `image` (processing), `image_hasher` (phash), `ndarray` (tensors), `linfa` + `linfa-svm` (SVM training & Platt scaling), `kamadak-exif` (EXIF parsing), `libc` (disk space on Linux), `zip` (simple zip), `async_zip` (streaming zip), `tokio-util` (I/O compat), `mime_guess` (content-type detection for downloads).
+
 
 External: `ffmpeg` (video frame extraction).
 

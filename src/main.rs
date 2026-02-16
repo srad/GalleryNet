@@ -125,7 +125,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth_config: auth_config.clone(),
         upload_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
         login_rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        download_plans: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
     };
+
 
     // --- ROUTING ARCHITECTURE ---
 

@@ -5,6 +5,7 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 COPY frontend/ ./
+RUN npm test
 RUN npm run build
 
 # Stage 2: Rust builder
@@ -19,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     pkg-config \
     libssl-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
@@ -40,6 +42,7 @@ COPY . .
 # Build the application
 # We need to touch the main file to ensure a rebuild
 RUN touch src/main.rs
+RUN cargo test
 RUN cargo build --release
 
 # Find the downloaded onnxruntime library (libonnxruntime.so*)

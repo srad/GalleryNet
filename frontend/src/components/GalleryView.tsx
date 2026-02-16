@@ -6,7 +6,10 @@ import MediaCard from './MediaCard';
 import MediaModal from './MediaModal';
 import TagFilter from './TagFilter';
 import TagInput from './TagInput';
+import { apiClient } from '../api';
+import type { DownloadPlan } from '../api';
 import { apiFetch, fireUnauthorized } from '../auth';
+
 
 
 import ConfirmDialog from './ConfirmDialog';
@@ -143,8 +146,16 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const [showPicker, setShowPicker] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
+    const downloadAbortControllerRef = useRef<AbortController | null>(null);
+
     /** Download progress: received bytes so far, and total (if known from Content-Length) */
-    const [downloadProgress, setDownloadProgress] = useState<{ received: number; total: number | null } | null>(null);
+    const [downloadProgress, setDownloadProgress] = useState<{ 
+        received: number; 
+        total: number | null;
+        partIndex?: number;
+        partCount?: number;
+    } | null>(null);
+
     // For shift-click range selection
     const lastClickedRef = useRef<string | null>(null);
 
@@ -328,18 +339,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         setIsLoading(true);
         isLoadingRef.current = true;
         try {
-            const body = {
-                folder_id: activeFolderId || null,
+            const groups = await apiClient.getGroups({
+                folder_id: activeFolderId,
                 similarity: similarityOverride ?? groupSimilarity,
-            };
-            const res = await apiFetch('/api/media/group', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
             });
-            if (res.ok) {
-                setGroups(await res.json());
-            }
+            setGroups(groups);
         } catch (e) {
             console.error('Failed to fetch groups:', e);
         } finally {
@@ -349,33 +353,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
     }, [activeFolderId, groupSimilarity]);
 
+
     // --- Fetch groups when the slider is released (not while dragging) ---
     const commitGroupSimilarity = useCallback(() => {
         if (!isGrouped) return;
         fetchGroups();
     }, [isGrouped, fetchGroups]);
-
-    // --- Build fetch URL based on folder context ---
-    const buildUrl = useCallback((pageNum: number, currentFilter: MediaFilter, currentSort: SortOrder): string => {
-        const params = new URLSearchParams({
-            page: String(pageNum),
-            limit: String(PAGE_SIZE),
-            sort: currentSort,
-        });
-        if (currentFilter !== 'all') {
-            params.set('media_type', currentFilter);
-        }
-        if (viewFavorites) {
-            params.set('favorite', 'true');
-        }
-        if (filterTags.length > 0) {
-            params.set('tags', filterTags.join(','));
-        }
-        if (activeFolderId) {
-            return `/api/folders/${activeFolderId}/media?${params}`;
-        }
-        return `/api/media?${params}`;
-    }, [activeFolderId, viewFavorites, filterTags]);
 
     // --- Fetch a single page ---
     const fetchPage = useCallback(async (pageNum: number, currentFilter: MediaFilter, currentSort: SortOrder, append: boolean) => {
@@ -384,11 +367,15 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         isLoadingRef.current = true;
 
         try {
-            const url = buildUrl(pageNum, currentFilter, currentSort);
-            const res = await apiFetch(url);
-            if (!res.ok || id !== fetchIdRef.current) return;
-
-            const results: MediaItem[] = await res.json();
+            const results = await apiClient.getMedia({
+                page: pageNum,
+                limit: PAGE_SIZE,
+                sort: currentSort,
+                media_type: currentFilter,
+                favorite: viewFavorites,
+                tags: filterTags,
+                folder_id: activeFolderId,
+            });
             if (id !== fetchIdRef.current) return; // stale
 
             if (append) {
@@ -408,32 +395,25 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 setInitialLoad(false);
             }
         }
-    }, [buildUrl]);
+    }, [viewFavorites, filterTags, activeFolderId]);
 
     // --- Silently merge new items and refresh metadata when refreshKey changes ---
+
     const mergeNewItems = useCallback(async (currentFilter: MediaFilter, currentSort: SortOrder) => {
         const id = ++fetchIdRef.current;
         const currentCount = Math.max(PAGE_SIZE, mediaRef.current.length);
 
         try {
             // Fetch enough items to cover everything currently loaded, ensuring metadata sync
-            const params = new URLSearchParams({
-                page: '1',
-                limit: String(currentCount),
+            const freshItems = await apiClient.getMedia({
+                page: 1,
+                limit: currentCount,
                 sort: currentSort,
+                media_type: currentFilter,
+                favorite: viewFavorites,
+                tags: filterTags,
+                folder_id: activeFolderId,
             });
-            if (currentFilter !== 'all') params.set('media_type', currentFilter);
-            if (viewFavorites) params.set('favorite', 'true');
-            if (filterTags.length > 0) params.set('tags', filterTags.join(','));
-            
-            const url = activeFolderId 
-                ? `/api/folders/${activeFolderId}/media?${params}`
-                : `/api/media?${params}`;
-
-            const res = await apiFetch(url);
-            if (!res.ok || id !== fetchIdRef.current) return;
-
-            const freshItems: MediaItem[] = await res.json();
             if (id !== fetchIdRef.current) return;
 
             setMedia(prev => {
@@ -472,6 +452,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
     }, [activeFolderId, viewFavorites, filterTags]);
 
+
     // --- Full reset when filter, sortOrder, or grouping mode changes ---
     const fetchGroupsRef = useRef(fetchGroups);
     fetchGroupsRef.current = fetchGroups;
@@ -480,16 +461,16 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         if (selectedMediaId && !media.find(m => m.id === selectedMediaId) && 
             (!isGrouped || !groups.some(g => g.items.some(m => m.id === selectedMediaId)))) {
             
-            apiFetch(`/api/media/${selectedMediaId}`)
-                .then(res => res.ok ? res.json() : null)
-                .then(data => {
-                    if (data) setStandaloneItem(data);
+            apiClient.getMediaItem(selectedMediaId)
+                .then(item => {
+                    if (item) setStandaloneItem(item);
                 })
                 .catch(() => {});
         } else {
             setStandaloneItem(null);
         }
     }, [selectedMediaId, media, isGrouped, groups]);
+
 
     useEffect(() => {
         if (isGrouped) {
@@ -524,17 +505,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         setMedia(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: newStatus } : m));
         
         try {
-            await apiFetch(`/api/media/${item.id}/favorite`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ favorite: newStatus }),
-            });
+            await apiClient.toggleFavorite(item.id, newStatus);
         } catch (e) {
             console.error('Toggle favorite error:', e);
             // Revert
             setMedia(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: !newStatus } : m));
         }
     }, []);
+
 
     const handleBatchTag = useCallback(async (force = false) => {
         if (!batchTags.length && !force) {
@@ -550,11 +528,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
         setIsBatchTagging(true);
         try {
-            await apiFetch('/api/media/batch-tags', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ids, tags: batchTags }),
-            });
+            await apiClient.updateMediaTagsBatch(ids, batchTags);
             
             // Optimistic update for immediate feedback
             const newTagDetails = batchTags.map(name => ({ name, is_auto: false }));
@@ -581,6 +555,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
 
 
+
     const handleAutoTag = useCallback(async () => {
         setIsAutoTagging(true);
         const ac = new AbortController();
@@ -589,17 +564,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         
         try {
             // 1. Get initial count
-            const countParams = new URLSearchParams();
-            if (activeFolderId) countParams.set('folder_id', activeFolderId);
-            const initialRes = await apiFetch(`/api/tags/count?${countParams}`, { signal: ac.signal });
-            const initialCount = initialRes.ok ? (await initialRes.json()).count : 0;
+            const initialCount = await apiClient.countAutoTags(activeFolderId, ac.signal);
 
             if (ac.signal.aborted) return;
 
             // 2. Get models to process
-            const modelsRes = await apiFetch('/api/tags/models', { signal: ac.signal });
-            if (!modelsRes.ok) throw new Error('Failed to fetch trained models');
-            const models: [number, string][] = await modelsRes.json();
+            const models = await apiClient.getTagModels(ac.signal);
             
             if (models.length === 0) {
                 setAutoTagResult({
@@ -623,17 +593,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 setAutoTagProgress({ current: i, total: models.length, label: `Applying "${tagName}"...` });
                 
                 try {
-                    const res = await apiFetch(`/api/tags/${tagId}/apply`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ folder_id: activeFolderId || null }),
-                        signal: ac.signal,
-                    });
-                    
-                    if (!res.ok) {
-                        const err = await res.json();
-                        errors.push(`${tagName}: ${err.error || 'Unknown error'}`);
-                    }
+                    await apiClient.applyTagModel(tagId, activeFolderId, ac.signal);
                 } catch (e: any) {
                     if (e.name === 'AbortError') throw e;
                     errors.push(`${tagName}: Network error or crash`);
@@ -645,8 +605,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             setAutoTagProgress({ current: models.length, total: models.length, label: 'Finalizing...' });
             
             // 4. Get final count
-            const finalRes = await apiFetch(`/api/tags/count?${countParams}`, { signal: ac.signal });
-            const finalCount = finalRes.ok ? (await finalRes.json()).count : 0;
+            const finalCount = await apiClient.countAutoTags(activeFolderId, ac.signal);
 
             let message = `Total auto-tags before: ${initialCount}\nTotal auto-tags after: ${finalCount}\nChange: ${finalCount >= initialCount ? '+' : ''}${finalCount - initialCount}`;
             
@@ -678,21 +637,19 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
     }, [activeFolderId, onUploadComplete]);
 
+
     // --- Handle items picked from library (when acting as picker parent) ---
     const handlePickItems = useCallback(async (ids: string[]) => {
         if (!activeFolderId || ids.length === 0) return;
         try {
-            await apiFetch(`/api/folders/${activeFolderId}/media`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(ids),
-            });
+            await apiClient.addMediaToFolder(activeFolderId, ids);
             setShowPicker(false);
             onUploadComplete?.(); // Trigger refresh
         } catch (e) {
             console.error('Pick items error:', e);
         }
     }, [activeFolderId, onUploadComplete]);
+
 
     // --- Gentle merge when refreshKey changes (uploads) ---
     useEffect(() => {
@@ -810,22 +767,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 .filter(m => selected.has(m.filename) && m.id)
                 .map(m => m.id!);
 
-            const res = await apiFetch('/api/media/batch-delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(ids),
-            });
-
-            if (res.ok) {
-                // Remove deleted items from local state
-                const deletedFilenames = new Set(selected);
-                setMedia(prev => prev.filter(m => !deletedFilenames.has(m.filename)));
-                exitSelectionMode();
-                setShowBatchDeleteConfirm(false);
-                if (activeFolderId) onFoldersChanged();
-            } else {
-                console.error('Batch delete failed:', res.status);
-            }
+            await apiClient.deleteMediaBatch(ids);
+            
+            // Remove deleted items from local state
+            const deletedFilenames = new Set(selected);
+            setMedia(prev => prev.filter(m => !deletedFilenames.has(m.filename)));
+            exitSelectionMode();
+            setShowBatchDeleteConfirm(false);
+            if (activeFolderId) onFoldersChanged();
         } catch (e) {
             console.error('Batch delete error:', e);
         } finally {
@@ -833,29 +782,27 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
     }, [selected, media, exitSelectionMode, activeFolderId, onFoldersChanged]);
 
+
     const handleSingleDelete = useCallback(async (item: MediaItem) => {
         if (!item.id) return;
         setIsDeleting(true);
         try {
-            const res = await apiFetch(`/api/media/${item.id}`, {
-                method: 'DELETE',
-            });
+            await apiClient.deleteMedia(item.id);
 
-            if (res.ok) {
-                setMedia(prev => prev.filter(m => m.id !== item.id));
-                setSearchParams(prev => {
-                    const next = new URLSearchParams(prev);
-                    next.delete('media');
-                    return next;
-                });
-                if (activeFolderId) onFoldersChanged();
-            }
+            setMedia(prev => prev.filter(m => m.id !== item.id));
+            setSearchParams(prev => {
+                const next = new URLSearchParams(prev);
+                next.delete('media');
+                return next;
+            });
+            if (activeFolderId) onFoldersChanged();
         } catch (e) {
             console.error('Delete error:', e);
         } finally {
             setIsDeleting(false);
         }
     }, [activeFolderId, onFoldersChanged, setSearchParams]);
+
 
     // --- Remove from folder (when viewing a folder) ---
     const handleRemoveFromFolder = useCallback(async (force = false) => {
@@ -871,25 +818,20 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 .filter(m => selected.has(m.filename) && m.id)
                 .map(m => m.id!);
 
-            const res = await apiFetch(`/api/folders/${activeFolderId}/media/remove`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ media_ids: ids }),
-            });
+            await apiClient.removeMediaFromFolder(activeFolderId, ids);
 
-            if (res.ok) {
-                const removedFilenames = new Set(selected);
-                setMedia(prev => prev.filter(m => !removedFilenames.has(m.filename)));
-                exitSelectionMode();
-                setShowRemoveFromFolderConfirm(false);
-                onFoldersChanged();
-            }
+            const removedFilenames = new Set(selected);
+            setMedia(prev => prev.filter(m => !removedFilenames.has(m.filename)));
+            exitSelectionMode();
+            setShowRemoveFromFolderConfirm(false);
+            onFoldersChanged();
         } catch (e) {
             console.error('Remove from folder error:', e);
         } finally {
             setIsDeleting(false);
         }
     }, [selected, media, activeFolderId, exitSelectionMode, onFoldersChanged]);
+
 
 
     // --- Add selected items to a folder ---
@@ -901,23 +843,18 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 .filter(m => selected.has(m.filename) && m.id)
                 .map(m => m.id!);
 
-            const res = await apiFetch(`/api/folders/${targetFolderId}/media`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(ids),
-            });
+            await apiClient.addMediaToFolder(targetFolderId, ids);
 
-            if (res.ok) {
-                setShowFolderPicker(false);
-                exitSelectionMode();
-                onFoldersChanged();
-            }
+            setShowFolderPicker(false);
+            exitSelectionMode();
+            onFoldersChanged();
         } catch (e) {
             console.error('Add to folder error:', e);
         } finally {
             setIsAddingToFolder(false);
         }
     }, [selected, media, exitSelectionMode, onFoldersChanged]);
+
 
     // --- Helper: trigger browser download from a blob ---
     const triggerDownload = useCallback((blob: Blob, headers: Headers) => {
@@ -937,58 +874,67 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         URL.revokeObjectURL(url);
     }, []);
 
+    // --- Helper to execute a sequence of streamed downloads ---
+    const executeDownloadParts = useCallback(async (plan: DownloadPlan) => {
+        const abortController = new AbortController();
+        downloadAbortControllerRef.current = abortController;
+
+        try {
+            for (let i = 0; i < plan.parts.length; i++) {
+                if (abortController.signal.aborted) break;
+
+                const part = plan.parts[i];
+                const { blob, headers } = await apiClient.downloadStreamPart(
+                    part,
+                    i + 1,
+                    plan.parts.length,
+                    (p) => setDownloadProgress(p),
+                    abortController.signal
+                );
+                triggerDownload(blob, headers);
+            }
+        } finally {
+            downloadAbortControllerRef.current = null;
+        }
+    }, [triggerDownload]);
+
+
     // --- Folder download ---
     const handleDownloadFolder = useCallback(async () => {
         if (!activeFolderId) return;
 
         setIsDownloading(true);
+        const abortController = new AbortController();
+        downloadAbortControllerRef.current = abortController;
         setDownloadProgress({ received: 0, total: null });
         try {
-            const res = await apiFetch(`/api/folders/${activeFolderId}/download`);
-
-            if (!res.ok) {
-                console.error('Folder download failed:', res.status);
-                return;
-            }
-
-            // Stream the response to track progress
-            const contentLength = res.headers.get('Content-Length');
-            const total = contentLength ? parseInt(contentLength, 10) : null;
-            setDownloadProgress({ received: 0, total });
-
-            const reader = res.body?.getReader();
-            if (!reader) {
-                const blob = await res.blob();
-                triggerDownload(blob, res.headers);
-                return;
-            }
-
-            const chunks: Uint8Array[] = [];
-            let received = 0;
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-                received += value.length;
-                setDownloadProgress({ received, total });
-            }
-
-            const blob = new Blob(chunks as BlobPart[]);
-            triggerDownload(blob, res.headers);
-        } catch (e) {
-            console.error('Download error:', e);
+            const plan = await apiClient.getFolderDownloadPlan(activeFolderId, abortController.signal);
+            await executeDownloadParts(plan);
+        } catch (e: any) {
+            if (e.name !== 'AbortError') console.error('Download error:', e);
         } finally {
             setIsDownloading(false);
             setDownloadProgress(null);
+            downloadAbortControllerRef.current = null;
         }
-    }, [activeFolderId, triggerDownload]);
+    }, [activeFolderId, executeDownloadParts]);
+
 
     // --- Batch download ---
+    const handleCancelDownload = useCallback(() => {
+        if (downloadAbortControllerRef.current) {
+            downloadAbortControllerRef.current.abort();
+        }
+        setIsDownloading(false);
+        setDownloadProgress(null);
+    }, []);
+
     const handleBatchDownload = useCallback(async () => {
         if (selected.size === 0) return;
 
         setIsDownloading(true);
+        const abortController = new AbortController();
+        downloadAbortControllerRef.current = abortController;
         setDownloadProgress({ received: 0, total: null });
         try {
             // Resolve filenames -> IDs
@@ -996,52 +942,18 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 .filter(m => selected.has(m.filename) && m.id)
                 .map(m => m.id!);
 
-            const res = await apiFetch('/api/media/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(ids),
-            });
-
-            if (!res.ok) {
-                console.error('Download failed:', res.status);
-                return;
-            }
-
-            // Stream the response to track progress
-            const contentLength = res.headers.get('Content-Length');
-            const total = contentLength ? parseInt(contentLength, 10) : null;
-            setDownloadProgress({ received: 0, total });
-
-            const reader = res.body?.getReader();
-            if (!reader) {
-                // Fallback: no streaming support
-                const blob = await res.blob();
-                triggerDownload(blob, res.headers);
-                exitSelectionMode();
-                return;
-            }
-
-            const chunks: Uint8Array[] = [];
-            let received = 0;
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-                received += value.length;
-                setDownloadProgress({ received, total });
-            }
-
-            const blob = new Blob(chunks as BlobPart[]);
-            triggerDownload(blob, res.headers);
+            const plan = await apiClient.getDownloadPlan(ids, abortController.signal);
+            await executeDownloadParts(plan);
             exitSelectionMode();
-        } catch (e) {
-            console.error('Download error:', e);
+        } catch (e: any) {
+            if (e.name !== 'AbortError') console.error('Download error:', e);
         } finally {
             setIsDownloading(false);
             setDownloadProgress(null);
+            downloadAbortControllerRef.current = null;
         }
-    }, [selected, media, triggerDownload, exitSelectionMode]);
+    }, [selected, media, executeDownloadParts, exitSelectionMode]);
+
 
     // --- Escape key to exit selection mode ---
     useEffect(() => {
@@ -1887,10 +1799,15 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     <div className="bg-white rounded-2xl shadow-2xl px-6 sm:px-8 py-5 sm:py-6 flex flex-col items-center gap-4 mx-4 w-[calc(100%-2rem)] max-w-xs sm:mx-0 sm:w-auto sm:min-w-[280px]">
                         <LoadingIndicator 
                             variant="centered" 
-                            label="Preparing download..." 
+                            label={
+                                downloadProgress.partIndex 
+                                    ? `Downloading part ${downloadProgress.partIndex} of ${downloadProgress.partCount}...`
+                                    : (selected.size > 0 ? `Downloading ${selected.size} items...` : "Downloading folder...")
+                            } 
                             size="lg" 
                             color="text-blue-600" 
                         />
+
                         {downloadProgress.total ? (
                             <>
                                 <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
@@ -1908,9 +1825,17 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                 {formatBytes(downloadProgress.received)} received
                             </p>
                         )}
+
+                        <button
+                            onClick={handleCancelDownload}
+                            className="mt-2 px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all active:scale-95"
+                        >
+                            Cancel Download
+                        </button>
                     </div>
                 </div>
             )}
+
 
             {/* Detail modal */}
             {(() => {

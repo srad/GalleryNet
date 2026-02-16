@@ -3,7 +3,9 @@
  * App.tsx listens for this to redirect to the login screen.
  */
 export function fireUnauthorized() {
-    window.dispatchEvent(new CustomEvent('gallerynet-unauthorized'));
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('gallerynet-unauthorized'));
+    }
 }
 
 /**

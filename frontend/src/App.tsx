@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useLocation, useNavigate, matchPath } from 'react-router-dom';
 import type { MediaFilter, Folder } from './types';
-import Sidebar, { type Tab } from './components/Sidebar';
+import Sidebar from './components/Sidebar';
 import GalleryView from './components/GalleryView';
 import SearchView from './components/SearchView';
 import LoginView from './components/LoginView';
@@ -9,11 +10,13 @@ import { apiFetch } from './auth';
 type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
 
 export default function App() {
+    const location = useLocation();
+    const navigate = useNavigate();
+    
     const [authState, setAuthState] = useState<AuthState>('loading');
     const [authRequired, setAuthRequired] = useState(false);
-    const [activeTab, setActiveTab] = useState<Tab>('gallery');
-    const [activeFolder, setActiveFolder] = useState<Folder | null>(null);
     const [folders, setFolders] = useState<Folder[]>([]);
+    const [foldersLoaded, setFoldersLoaded] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     // Listen for 401 events from any API call
@@ -22,12 +25,12 @@ export default function App() {
         window.addEventListener('gallerynet-unauthorized', handler);
         return () => window.removeEventListener('gallerynet-unauthorized', handler);
     }, []);
+    
     const [mediaFilter, setMediaFilter] = useState<MediaFilter>(() => {
         const saved = localStorage.getItem('galleryFilter');
         return saved === 'image' || saved === 'video' ? saved : 'all';
     });
     const [refreshKey, setRefreshKey] = useState(0);
-    const [activeSearchMediaId, setActiveSearchMediaId] = useState<string | null>(null);
     const [isBusy, setIsBusy] = useState(false);
 
     // Check authentication status on mount
@@ -57,8 +60,13 @@ export default function App() {
     const fetchFolders = useCallback(async () => {
         try {
             const res = await apiFetch('/api/folders');
-            if (res.ok) setFolders(await res.json());
+            if (res.ok) {
+                setFolders(await res.json());
+            }
         } catch { /* ignore */ }
+        finally {
+            setFoldersLoaded(true);
+        }
     }, []);
 
     useEffect(() => {
@@ -79,7 +87,8 @@ export default function App() {
             await fetch('/api/logout', { method: 'POST' });
         } catch { /* ignore */ }
         setAuthState('unauthenticated');
-    }, []);
+        navigate('/');
+    }, [navigate]);
 
     const handleFilterChange = useCallback((filter: MediaFilter) => {
         setMediaFilter(filter);
@@ -90,46 +99,30 @@ export default function App() {
         setRefreshKey(k => k + 1);
     }, []);
 
-    const handleSelectFolder = useCallback((folder: Folder) => {
-        setActiveFolder(folder);
-        setActiveTab('folder');
-    }, []);
-
-    const handleBackToGallery = useCallback(() => {
-        setActiveFolder(null);
-        setActiveTab('gallery');
-    }, []);
-
-    const handleTabChange = useCallback((tab: Tab) => {
-        if (tab !== 'folder') {
-            setActiveFolder(null);
-        }
-        if (tab !== 'search') {
-            setActiveSearchMediaId(null);
-        }
-        setActiveTab(tab);
-        setSidebarOpen(false); // Close sidebar on mobile after navigation
-    }, []);
-
-    const handleSelectFolderWrapped = useCallback((folder: Folder) => {
-        handleSelectFolder(folder);
-        setSidebarOpen(false); // Close sidebar on mobile after navigation
-    }, [handleSelectFolder]);
-
     const handleFindSimilar = useCallback((mediaId: string) => {
-        setActiveSearchMediaId(mediaId);
-        setActiveTab('search');
-    }, []);
+        navigate(`/search?source=${mediaId}`);
+    }, [navigate]);
 
-    // Warn before leaving/reloading while uploads are active
-    // Note: This is now handled locally in GalleryView if needed, or we can add a global context later if strictly required.
-    // For now, removing the global effect since upload state is local to GalleryView.
+    // Routing Logic
+    const isGallery = location.pathname === '/';
+    const isFavorites = location.pathname === '/favorites';
+    const isSearch = location.pathname.startsWith('/search');
+    const folderMatch = matchPath('/folders/:folderId', location.pathname);
+    const isFolder = !!folderMatch;
+    const activeFolderId = folderMatch?.params.folderId;
+    const activeFolder = folders.find(f => f.id === activeFolderId) || null;
 
     // Loading state
-    if (authState === 'loading') {
+    if (authState === 'loading' || (authState === 'authenticated' && !foldersLoaded)) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-50">
-                <div className="text-gray-400 text-sm">Loading...</div>
+                <div className="flex flex-col items-center gap-3">
+                    <svg className="w-8 h-8 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <div className="text-gray-400 text-sm font-medium">Loading GalleryNet...</div>
+                </div>
             </div>
         );
     }
@@ -168,13 +161,9 @@ export default function App() {
                 )}
 
                 <Sidebar
-                    activeTab={activeTab}
-                    onTabChange={handleTabChange}
                     refreshKey={refreshKey}
                     onLogout={authRequired ? handleLogout : undefined}
                     folders={folders}
-                    activeFolder={activeFolder}
-                    onSelectFolder={handleSelectFolderWrapped}
                     onFoldersChanged={fetchFolders}
                     disabled={isBusy}
                     mobileOpen={sidebarOpen}
@@ -182,7 +171,7 @@ export default function App() {
                 />
 
                 <main className="flex-1 h-full overflow-y-auto">
-                    <div className={activeTab === 'gallery' ? '' : 'hidden'}>
+                    <div className={isGallery ? '' : 'hidden'}>
                         <GalleryView
                             filter={mediaFilter}
                             onFilterChange={handleFilterChange}
@@ -195,7 +184,7 @@ export default function App() {
                         />
                     </div>
 
-                    <div className={activeTab === 'favorites' ? '' : 'hidden'}>
+                    <div className={isFavorites ? '' : 'hidden'}>
                         <GalleryView
                             filter={mediaFilter}
                             onFilterChange={handleFilterChange}
@@ -209,19 +198,19 @@ export default function App() {
                         />
                     </div>
 
-                    <div className={activeTab === 'search' ? 'p-4 md:p-8' : 'hidden'}>
-                        <SearchView initialMediaId={activeSearchMediaId} />
+                    <div className={isSearch ? 'p-4 md:p-8' : 'hidden'}>
+                        <SearchView />
                     </div>
 
-                    {activeTab === 'folder' && activeFolder && (
+                    {isFolder && activeFolderId && (
                         <GalleryView
-                            key={`folder-${activeFolder.id}`}
+                            key={`folder-${activeFolderId}`}
                             filter={mediaFilter}
                             onFilterChange={handleFilterChange}
                             refreshKey={refreshKey}
-                            folderId={activeFolder.id}
-                            folderName={activeFolder.name}
-                            onBackToGallery={handleBackToGallery}
+                            folderId={activeFolderId}
+                            folderName={activeFolder?.name}
+                            onBackToGallery={() => navigate('/')}
                             folders={folders}
                             onFoldersChanged={fetchFolders}
                             onUploadComplete={handleUploadComplete}
@@ -234,3 +223,4 @@ export default function App() {
         </div>
     );
 }
+

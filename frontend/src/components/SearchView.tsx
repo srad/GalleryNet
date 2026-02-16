@@ -1,27 +1,35 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { MediaItem } from '../types';
 import MediaCard from './MediaCard';
+import MediaModal from './MediaModal';
 import { apiFetch } from '../auth';
 
-interface SearchViewProps {
-    initialMediaId?: string | null;
-}
+export default function SearchView() {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const sourceId = searchParams.get('source');
+    const selectedMediaId = searchParams.get('media');
 
-export default function SearchView({ initialMediaId }: SearchViewProps) {
     const [searchFile, setSearchFile] = useState<File | null>(null);
     const [similarity, setSimilarity] = useState<number>(70);
     const [searchResults, setSearchResults] = useState<MediaItem[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [activeId, setActiveId] = useState<string | null>(null);
 
-    // Effect to handle prop changes (new search initiated from Gallery)
+    // Effect to handle prop changes (new search initiated from Gallery via URL)
     useEffect(() => {
-        if (initialMediaId) {
-            setActiveId(initialMediaId);
+        if (sourceId && sourceId !== activeId) {
+            setActiveId(sourceId);
             setSearchFile(null);
-            handleSearchById(initialMediaId, similarity);
+            handleSearchById(sourceId, similarity);
+        } else if (!sourceId && !searchFile) {
+            // Cleared via URL?
+            if (activeId) {
+                setActiveId(null);
+                setSearchResults([]);
+            }
         }
-    }, [initialMediaId]);
+    }, [sourceId]);
 
     const handleSearchById = async (id: string, sim: number) => {
         setIsSearching(true);
@@ -41,6 +49,8 @@ export default function SearchView({ initialMediaId }: SearchViewProps) {
 
     const handleSearch = async () => {
         if (activeId) {
+            // If we have an active ID, update the URL to reflect the search if not already
+            // (Though typically activeId comes FROM the URL)
             handleSearchById(activeId, similarity);
             return;
         }
@@ -67,13 +77,91 @@ export default function SearchView({ initialMediaId }: SearchViewProps) {
         setActiveId(null);
         setSearchFile(null);
         setSearchResults([]);
+        // Clear source param
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.delete('source');
+            return next;
+        });
     };
 
-    // Helper to get thumbnail URL (duplicated from MediaCard logic, simplified)
+    const handleCardClick = useCallback((item: MediaItem) => {
+        if (item.id) {
+            setSearchParams(prev => {
+                const next = new URLSearchParams(prev);
+                next.set('media', item.id!);
+                return next;
+            });
+        }
+    }, [setSearchParams]);
+
+    // Helper to get thumbnail URL
     const getThumbnailUrl = (uuid: string) => {
         const p1 = uuid.substring(0, 2);
         const p2 = uuid.substring(2, 4);
         return `/thumbnails/${p1}/${p2}/${uuid}.jpg`;
+    };
+
+    // Find similar from modal (updates source param)
+    const handleFindSimilar = useCallback((id: string) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('source', id);
+            next.delete('media'); // Close modal
+            return next;
+        });
+    }, [setSearchParams]);
+
+    // Render modal logic
+    const renderModal = () => {
+        if (!selectedMediaId) return null;
+        
+        const idx = searchResults.findIndex(m => m.id === selectedMediaId);
+        if (idx === -1) return null; // Item not in results? Maybe fetching full detail? 
+        // If searching via ID, the source item might not be in results (it's the query).
+        // But the user clicked a result.
+        
+        const item = searchResults[idx];
+        const prevItem = idx > 0 ? searchResults[idx - 1] : undefined;
+        const nextItem = idx < searchResults.length - 1 ? searchResults[idx + 1] : undefined;
+
+        const handleSetMediaId = (id: string) => {
+             setSearchParams(prev => {
+                const next = new URLSearchParams(prev);
+                next.set('media', id);
+                return next;
+            });
+        };
+
+        return (
+            <MediaModal
+                item={item}
+                onClose={() => setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('media'); return next; })}
+                onPrev={prevItem?.id ? () => handleSetMediaId(prevItem!.id!) : null}
+                onNext={nextItem?.id ? () => handleSetMediaId(nextItem!.id!) : null}
+                onFindSimilar={handleFindSimilar}
+                // Search view doesn't support favorite/delete/tags context fully yet or passed props?
+                // MediaModal handles specific item actions via API.
+                // We just need to handle the list updates if an item is deleted.
+                // For now, let's omit callback for delete to avoid complex state sync, 
+                // or just remove from local results.
+                onToggleFavorite={() => {
+                    // Optimistic update locally
+                    const newStatus = !item.is_favorite;
+                    setSearchResults(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: newStatus } : m));
+                    // API call is handled inside MediaModal? No, MediaModal expects parent to handle it?
+                    // Wait, MediaModal renders buttons that call props. 
+                    // But in GalleryView we had `handleToggleFavorite`.
+                    // We need to duplicate that logic here or accept it as prop.
+                    // For simplicity, let's implement basic favorite toggle here.
+                    apiFetch(`/api/media/${item.id}/favorite`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ favorite: newStatus }),
+                    }).catch(e => console.error(e));
+                }}
+            />
+        );
     };
 
     return (
@@ -144,7 +232,11 @@ export default function SearchView({ initialMediaId }: SearchViewProps) {
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-4 md:gap-6 pb-8">
                         {searchResults.map((item) => (
-                            <MediaCard key={`search-${item.id}`} item={item} />
+                            <MediaCard 
+                                key={`search-${item.id}`} 
+                                item={item}
+                                onClick={() => handleCardClick(item)}
+                            />
                         ))}
                     </div>
                 </div>
@@ -153,6 +245,8 @@ export default function SearchView({ initialMediaId }: SearchViewProps) {
                     {isSearching ? 'Analyzing...' : 'No matches found or no search initiated.'}
                 </div>
             )}
+
+            {renderModal()}
         </div>
     );
 }

@@ -1,18 +1,13 @@
 import {useState, useEffect, useCallback, useRef} from 'react';
+import {Link, useLocation} from 'react-router-dom';
 import {PhotoIcon, SearchIcon, HeartIcon} from './Icons';
 import type {Folder} from '../types';
 import {apiFetch} from '../auth';
 
-export type Tab = 'gallery' | 'search' | 'folder' | 'favorites';
-
 interface SidebarProps {
-    activeTab: Tab;
-    onTabChange: (tab: Tab) => void;
     refreshKey: number;
     onLogout?: () => void;
     folders: Folder[];
-    activeFolder: Folder | null;
-    onSelectFolder: (folder: Folder) => void;
     onFoldersChanged: () => void;
     /** When true, all navigation is disabled (e.g. during group computation) */
     disabled?: boolean;
@@ -40,7 +35,8 @@ function formatBytes(bytes: number): string {
     return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, folders, activeFolder, onSelectFolder, onFoldersChanged, disabled, mobileOpen, onMobileClose}: SidebarProps) {
+export default function Sidebar({refreshKey, onLogout, folders, onFoldersChanged, disabled, mobileOpen, onMobileClose}: SidebarProps) {
+    const location = useLocation();
     const [stats, setStats] = useState<Stats | null>(null);
     const [newFolderName, setNewFolderName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
@@ -86,6 +82,7 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
     }, [newFolderName, onFoldersChanged]);
 
     const handleDeleteFolder = useCallback(async (e: React.MouseEvent, folderId: string) => {
+        e.preventDefault(); // Prevent navigation
         e.stopPropagation();
         if (!window.confirm('Delete this folder? Media files will not be deleted.')) return;
         try {
@@ -96,6 +93,7 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
 
     // --- Rename handlers ---
     const startRename = useCallback((e: React.MouseEvent, folder: Folder) => {
+        e.preventDefault(); // Prevent navigation
         e.stopPropagation();
         setRenamingId(folder.id);
         setRenameValue(folder.name);
@@ -195,6 +193,13 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
         ? Math.round(((stats.disk_total_bytes - stats.disk_free_bytes) / stats.disk_total_bytes) * 100)
         : 0;
 
+    const isActive = (path: string) => {
+        if (path === '/') return location.pathname === '/';
+        return location.pathname.startsWith(path);
+    };
+
+    const isFolderActive = (id: string) => location.pathname === `/folders/${id}`;
+
     return (
         <aside className={`
             fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0
@@ -224,27 +229,27 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
             </div>
 
             <nav className={`flex-1 p-4 space-y-2 overflow-y-auto ${disabled ? 'pointer-events-none' : ''}`}>
-                <button
-                    onClick={() => onTabChange('gallery')}
-                    disabled={disabled}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${activeTab === 'gallery' ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                <Link
+                    to="/"
+                    onClick={onMobileClose}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/') ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
                 >
                     <PhotoIcon/> Gallery
-                </button>
-                <button
-                    onClick={() => onTabChange('favorites')}
-                    disabled={disabled}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${activeTab === 'favorites' ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                </Link>
+                <Link
+                    to="/favorites"
+                    onClick={onMobileClose}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/favorites') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-100'}`}
                 >
                     <HeartIcon/> Favorites
-                </button>
-                <button
-                    onClick={() => onTabChange('search')}
-                    disabled={disabled}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${activeTab === 'search' ? 'bg-purple-50 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                </Link>
+                <Link
+                    to="/search"
+                    onClick={onMobileClose}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/search') ? 'bg-purple-50 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
                 >
                     <SearchIcon/> Visual Search
-                </button>
+                </Link>
 
                 {/* Folders section */}
                 <div className="pt-3 mt-3 border-t border-gray-100">
@@ -287,18 +292,26 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
                                     />
                                 </div>
                             ) : (
-                                 /* Normal folder row */
-                                <div
+                                 /* Normal folder row - now a Link */
+                                <Link
+                                    to={`/folders/${folder.id}`}
+                                    onClick={onMobileClose}
                                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors group cursor-pointer ${
-                                        activeTab === 'folder' && activeFolder?.id === folder.id
+                                        isFolderActive(folder.id)
                                             ? 'bg-amber-50 text-amber-700'
                                             : 'text-gray-600 hover:bg-gray-100'
                                     } ${dragIndex === index ? 'opacity-50' : ''}`}
-                                    onClick={() => onSelectFolder(folder)}
                                     onDoubleClick={(e) => startRename(e, folder)}
                                 >
                                     {/* Drag handle */}
-                                    <svg className="w-3 h-3 flex-shrink-0 text-gray-300 cursor-grab active:cursor-grabbing" viewBox="0 0 6 10" fill="currentColor">
+                                    <svg 
+                                        className="w-3 h-3 flex-shrink-0 text-gray-300 cursor-grab active:cursor-grabbing hover:text-gray-500" 
+                                        viewBox="0 0 6 10" 
+                                        fill="currentColor"
+                                        onMouseDown={e => e.stopPropagation()} // Allow dragging only from handle? Or whole row?
+                                        // The draggable is on the parent div, so we don't need to do anything special here unless we want to limit drag handle.
+                                        // But the parent div has draggable.
+                                    >
                                         <circle cx="1" cy="1" r="1"/><circle cx="5" cy="1" r="1"/>
                                         <circle cx="1" cy="5" r="1"/><circle cx="5" cy="5" r="1"/>
                                         <circle cx="1" cy="9" r="1"/><circle cx="5" cy="9" r="1"/>
@@ -317,7 +330,7 @@ export default function Sidebar({activeTab, onTabChange, refreshKey, onLogout, f
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                                         </svg>
                                     </button>
-                                </div>
+                                </Link>
 
                             )}
                         </div>

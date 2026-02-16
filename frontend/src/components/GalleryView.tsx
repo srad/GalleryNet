@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import type { MediaItem, MediaFilter, Folder, MediaGroup } from '../types';
 import { PhotoIcon, UploadIcon, PlusIcon, HeartIcon, TagIcon } from './Icons';
 import MediaCard from './MediaCard';
@@ -88,7 +89,17 @@ const FILTERS: { value: MediaFilter; label: string }[] = [
 ];
 
 export default function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar, favoritesOnly }: GalleryViewProps) {
+    const { folderId: routeFolderId } = useParams();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const activeFolderId = folderId || routeFolderId;
+    
+    // Determine folder name if not provided
+    const activeFolderName = folderName || folders.find(f => f.id === activeFolderId)?.name;
+
+    const selectedMediaId = searchParams.get('media');
+
     const [media, setMedia] = useState<MediaItem[]>([]);
+    const [standaloneItem, setStandaloneItem] = useState<MediaItem | null>(null); // For deep linking to items not in current page
     const [hasMore, setHasMore] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
     const [initialLoad, setInitialLoad] = useState(true);
@@ -98,7 +109,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     });
     const [viewFavorites, setViewFavorites] = useState(favoritesOnly || false);
     const [filterTags, setFilterTags] = useState<string[]>([]);
-    const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
+    // Removed local selectedFilename state in favor of URL param
     const [showBatchTagModal, setShowBatchTagModal] = useState(false);
     const [batchTags, setBatchTags] = useState<string[]>([]);
     const [isBatchTagging, setIsBatchTagging] = useState(false);
@@ -205,8 +216,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     // Add to folder if in folder view
                     try {
                         const json = JSON.parse(xhr.responseText);
-                        if (json.id && folderId) {
-                            apiFetch(`/api/folders/${folderId}/media`, {
+                        if (json.id && activeFolderId) {
+                            apiFetch(`/api/folders/${activeFolderId}/media`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify([json.id]),
@@ -254,7 +265,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             xhr.open('POST', '/api/upload');
             xhr.send(formData);
         }
-    }, [folderId, onUploadComplete]);
+    }, [activeFolderId, onUploadComplete]);
 
     const handleUpload = useCallback((files: FileList) => {
         if (files.length === 0) return;
@@ -281,7 +292,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         isLoadingRef.current = true;
         try {
             const body = {
-                folder_id: folderId || null,
+                folder_id: activeFolderId || null,
                 similarity: similarityOverride ?? groupSimilarity,
             };
             const res = await apiFetch('/api/media/group', {
@@ -299,7 +310,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             isLoadingRef.current = false;
             setInitialLoad(false);
         }
-    }, [folderId, groupSimilarity]);
+    }, [activeFolderId, groupSimilarity]);
 
     // --- Fetch groups when the slider is released (not while dragging) ---
     const commitGroupSimilarity = useCallback(() => {
@@ -321,16 +332,13 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             params.set('favorite', 'true');
         }
         if (filterTags.length > 0) {
-            // Repeat tags key: tags=a&tags=b
-            // But URLSearchParams.set overwrites. append appends.
-            // But we can also use comma separated as backend supports it now.
             params.set('tags', filterTags.join(','));
         }
-        if (folderId) {
-            return `/api/folders/${folderId}/media?${params}`;
+        if (activeFolderId) {
+            return `/api/folders/${activeFolderId}/media?${params}`;
         }
         return `/api/media?${params}`;
-    }, [folderId, viewFavorites, filterTags]);
+    }, [activeFolderId, viewFavorites, filterTags]);
 
     // --- Fetch a single page ---
     const fetchPage = useCallback(async (pageNum: number, currentFilter: MediaFilter, currentSort: SortOrder, append: boolean) => {
@@ -381,8 +389,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             if (viewFavorites) params.set('favorite', 'true');
             if (filterTags.length > 0) params.set('tags', filterTags.join(','));
             
-            const url = folderId 
-                ? `/api/folders/${folderId}/media?${params}`
+            const url = activeFolderId 
+                ? `/api/folders/${activeFolderId}/media?${params}`
                 : `/api/media?${params}`;
 
             const res = await apiFetch(url);
@@ -425,13 +433,26 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         } catch (e) {
             console.error('Failed to merge/refresh media:', e);
         }
-    }, [buildUrl, folderId, viewFavorites, filterTags]);
+    }, [activeFolderId, viewFavorites, filterTags]);
 
     // --- Full reset when filter, sortOrder, or grouping mode changes ---
-    // Note: fetchGroups is intentionally called via ref to avoid re-triggering
-    // this effect when groupSimilarity changes (the slider updates it continuously).
     const fetchGroupsRef = useRef(fetchGroups);
     fetchGroupsRef.current = fetchGroups;
+
+    useEffect(() => {
+        if (selectedMediaId && !media.find(m => m.id === selectedMediaId) && 
+            (!isGrouped || !groups.some(g => g.items.some(m => m.id === selectedMediaId)))) {
+            
+            apiFetch(`/api/media/${selectedMediaId}`)
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                    if (data) setStandaloneItem(data);
+                })
+                .catch(() => {});
+        } else {
+            setStandaloneItem(null);
+        }
+    }, [selectedMediaId, media, isGrouped, groups]);
 
     useEffect(() => {
         if (isGrouped) {
@@ -515,7 +536,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         } finally {
             setIsBatchTagging(false);
         }
-    }, [batchTags, media, selected, exitSelectionMode, fetchPage, filter, sortOrder, onUploadComplete]);
+    }, [batchTags, media, selected, exitSelectionMode, onUploadComplete]);
 
 
     const handleAutoTag = useCallback(async () => {
@@ -527,7 +548,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         try {
             // 1. Get initial count
             const countParams = new URLSearchParams();
-            if (folderId) countParams.set('folder_id', folderId);
+            if (activeFolderId) countParams.set('folder_id', activeFolderId);
             const initialRes = await apiFetch(`/api/tags/count?${countParams}`, { signal: ac.signal });
             const initialCount = initialRes.ok ? (await initialRes.json()).count : 0;
 
@@ -563,7 +584,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     const res = await apiFetch(`/api/tags/${tagId}/apply`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ folder_id: folderId || null }),
+                        body: JSON.stringify({ folder_id: activeFolderId || null }),
                         signal: ac.signal,
                     });
                     
@@ -613,13 +634,13 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 abortControllerRef.current = null;
             }
         }
-    }, [folderId, onUploadComplete]);
+    }, [activeFolderId, onUploadComplete]);
 
     // --- Handle items picked from library (when acting as picker parent) ---
     const handlePickItems = useCallback(async (ids: string[]) => {
-        if (!folderId || ids.length === 0) return;
+        if (!activeFolderId || ids.length === 0) return;
         try {
-            await apiFetch(`/api/folders/${folderId}/media`, {
+            await apiFetch(`/api/folders/${activeFolderId}/media`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(ids),
@@ -629,7 +650,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         } catch (e) {
             console.error('Pick items error:', e);
         }
-    }, [folderId, onUploadComplete]);
+    }, [activeFolderId, onUploadComplete]);
 
     // --- Gentle merge when refreshKey changes (uploads) ---
     useEffect(() => {
@@ -704,9 +725,15 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         });
     }, []); // Stable callback
 
-    // const handleCardClick = useCallback((filename: string) => {
-    //     setSelectedFilename(filename);
-    // }, []);
+    const handleCardClick = useCallback((item: MediaItem) => {
+        if (item.id) {
+            setSearchParams(prev => {
+                const next = new URLSearchParams(prev);
+                next.set('media', item.id!);
+                return next;
+            });
+        }
+    }, [setSearchParams]);
 
     const handleSelectAll = useCallback(() => {
         const currentMedia = mediaRef.current;
@@ -743,7 +770,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 const deletedFilenames = new Set(selected);
                 setMedia(prev => prev.filter(m => !deletedFilenames.has(m.filename)));
                 exitSelectionMode();
-                if (folderId) onFoldersChanged();
+                if (activeFolderId) onFoldersChanged();
             } else {
                 console.error('Batch delete failed:', res.status);
             }
@@ -752,7 +779,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         } finally {
             setIsDeleting(false);
         }
-    }, [selected, media, exitSelectionMode, folderId, onFoldersChanged]);
+    }, [selected, media, exitSelectionMode, activeFolderId, onFoldersChanged]);
 
     const handleSingleDelete = useCallback(async (item: MediaItem) => {
         if (!item.id) return;
@@ -764,19 +791,23 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
             if (res.ok) {
                 setMedia(prev => prev.filter(m => m.id !== item.id));
-                setSelectedFilename(null);
-                if (folderId) onFoldersChanged();
+                setSearchParams(prev => {
+                    const next = new URLSearchParams(prev);
+                    next.delete('media');
+                    return next;
+                });
+                if (activeFolderId) onFoldersChanged();
             }
         } catch (e) {
             console.error('Delete error:', e);
         } finally {
             setIsDeleting(false);
         }
-    }, [folderId, onFoldersChanged]);
+    }, [activeFolderId, onFoldersChanged, setSearchParams]);
 
     // --- Remove from folder (when viewing a folder) ---
     const handleRemoveFromFolder = useCallback(async () => {
-        if (selected.size === 0 || !folderId) return;
+        if (selected.size === 0 || !activeFolderId) return;
         const count = selected.size;
         if (!window.confirm(`Remove ${count} item${count > 1 ? 's' : ''} from this folder?`)) return;
 
@@ -786,7 +817,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 .filter(m => selected.has(m.filename) && m.id)
                 .map(m => m.id!);
 
-            const res = await apiFetch(`/api/folders/${folderId}/media/remove`, {
+            const res = await apiFetch(`/api/folders/${activeFolderId}/media/remove`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ media_ids: ids }),
@@ -803,7 +834,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         } finally {
             setIsDeleting(false);
         }
-    }, [selected, media, folderId, exitSelectionMode, onFoldersChanged]);
+    }, [selected, media, activeFolderId, exitSelectionMode, onFoldersChanged]);
 
     // --- Add selected items to a folder ---
     const handleAddToFolder = useCallback(async (targetFolderId: string) => {
@@ -852,12 +883,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
     // --- Folder download ---
     const handleDownloadFolder = useCallback(async () => {
-        if (!folderId) return;
+        if (!activeFolderId) return;
 
         setIsDownloading(true);
         setDownloadProgress({ received: 0, total: null });
         try {
-            const res = await apiFetch(`/api/folders/${folderId}/download`);
+            const res = await apiFetch(`/api/folders/${activeFolderId}/download`);
 
             if (!res.ok) {
                 console.error('Folder download failed:', res.status);
@@ -895,7 +926,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             setIsDownloading(false);
             setDownloadProgress(null);
         }
-    }, [folderId, triggerDownload]);
+    }, [activeFolderId, triggerDownload]);
 
     // --- Batch download ---
     const handleBatchDownload = useCallback(async () => {
@@ -1117,7 +1148,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     {/* Left: Navigation & Title */}
                     <div className="flex items-center gap-3 min-w-0">
-                        {folderId && onBackToGallery && (
+                        {activeFolderId && onBackToGallery && (
                             <button
                                 onClick={onBackToGallery}
                                 disabled={isBusy}
@@ -1130,7 +1161,9 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                             </button>
                         )}
                         <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900 truncate">
-                            {folderId && folderName ? folderName : 'Gallery'}
+                            {activeFolderId 
+                                ? (activeFolderName || 'Loading...') 
+                                : (favoritesOnly ? 'Favorites' : 'Gallery')}
                         </h2>
                     </div>
 
@@ -1165,7 +1198,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                     onClick={() => fileInputRef.current?.click()}
                                     disabled={uploadState?.active || isBusy}
                                     className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gray-900 rounded-xl shadow-sm hover:bg-gray-800 hover:shadow-md active:scale-95 transition-all disabled:opacity-70 disabled:pointer-events-none disabled:active:scale-100"
-                                    title={folderId ? "Upload files to this folder" : "Upload media"}
+                                    title={activeFolderId ? "Upload files to this folder" : "Upload media"}
                                 >
                                     <UploadIcon />
                                     <span className="hidden sm:inline">Upload</span>
@@ -1329,7 +1362,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         )}
                         
                         {/* Folder View Specific Actions */}
-                        {folderId && !isPicker && (
+                        {activeFolderId && !isPicker && (
                             <>
                                 <div className="w-px h-5 bg-gray-200 mx-1 hidden sm:block"></div>
                                 
@@ -1440,12 +1473,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
                     <PhotoIcon />
                     <p className="mt-4 text-gray-500">
-                        {folderId
+                        {activeFolderId
                             ? 'This folder is empty.'
                             : filter === 'all' ? 'No media uploaded yet.' : `No ${filter}s found.`}
                     </p>
                     <button onClick={() => fileInputRef.current?.click()} className="mt-4 text-blue-600 hover:underline">
-                        {folderId ? 'Upload files to this folder' : 'Upload your first image'}
+                        {activeFolderId ? 'Upload files to this folder' : 'Upload your first image'}
                     </button>
                 </div>
             )}
@@ -1481,7 +1514,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                 )}
                                 <MediaCard
                                     item={item}
-                                    onClick={() => setSelectedFilename(item.filename)}
+                                    onClick={() => handleCardClick(item)}
                                     selected={selected.has(item.filename)}
                                     selectionMode={selectionMode}
                                     onSelect={(e) => handleSelect(item.filename, e)}
@@ -1528,7 +1561,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                     <MediaCard
                         key={item.filename}
                         item={item}
-                        onClick={() => setSelectedFilename(item.filename)}
+                        onClick={() => handleCardClick(item)}
                         selected={selected.has(item.filename)}
                         selectionMode={selectionMode}
                         onSelect={(e) => handleSelect(item.filename, e)}
@@ -1560,7 +1593,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             {/* End of list */}
             {!hasMore && media.length > 0 && !isLoading && (
                 <p className="text-center text-xs text-gray-400 py-6">
-                    {folderId ? 'End of folder' : 'End of gallery'}
+                    {activeFolderId ? 'End of folder' : 'End of gallery'}
                 </p>
             )}
 
@@ -1672,7 +1705,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     </div>
 
                     {/* Remove from folder (only when viewing a folder) */}
-                    {folderId && (
+                    {activeFolderId && (
                         <button
                             onClick={handleRemoveFromFolder}
                             disabled={isDeleting}
@@ -1756,7 +1789,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
             {/* Detail modal */}
             {(() => {
-                if (selectedFilename === null || selectionMode) return null;
+                if (selectedMediaId === null || selectionMode) return null;
                 
                 // Find item in flat list or groups
                 let item: MediaItem | undefined;
@@ -1764,17 +1797,17 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 let nextItem: MediaItem | undefined;
 
                 if (isGrouped) {
-                    for (const g of groups) {
-                        const idx = g.items.findIndex(m => m.filename === selectedFilename);
-                        if (idx !== -1) {
-                            item = g.items[idx];
-                            prevItem = g.items[idx - 1];
-                            nextItem = g.items[idx + 1];
-                            break;
-                        }
+                    // This is inefficient but functional for now. Groups are usually small.
+                    // Flattening every render is bad, but groups state doesn't change often.
+                    const allItems = groups.flatMap(g => g.items);
+                    const idx = allItems.findIndex(m => m.id === selectedMediaId);
+                    if (idx !== -1) {
+                        item = allItems[idx];
+                        prevItem = allItems[idx - 1];
+                        nextItem = allItems[idx + 1];
                     }
                 } else {
-                    const idx = media.findIndex(m => m.filename === selectedFilename);
+                    const idx = media.findIndex(m => m.id === selectedMediaId);
                     if (idx !== -1) {
                         item = media[idx];
                         prevItem = media[idx - 1];
@@ -1782,14 +1815,27 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     }
                 }
 
+                if (!item) {
+                    item = standaloneItem || undefined;
+                    // prevItem/nextItem remain undefined, so nav buttons will be hidden
+                }
+
                 if (!item) return null;
+
+                const handleSetMediaId = (id: string) => {
+                     setSearchParams(prev => {
+                        const next = new URLSearchParams(prev);
+                        next.set('media', id);
+                        return next;
+                    });
+                };
 
                 return (
                     <MediaModal
                         item={item}
-                        onClose={() => setSelectedFilename(null)}
-                        onPrev={prevItem ? () => setSelectedFilename(prevItem!.filename) : null}
-                        onNext={nextItem ? () => setSelectedFilename(nextItem!.filename) : null}
+                        onClose={() => setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('media'); return next; })}
+                        onPrev={prevItem && prevItem.id ? () => handleSetMediaId(prevItem!.id!) : null}
+                        onNext={nextItem && nextItem.id ? () => handleSetMediaId(nextItem!.id!) : null}
                         onFindSimilar={onFindSimilar}
                         onToggleFavorite={() => handleToggleFavorite(item!)}
                         onDelete={() => handleSingleDelete(item!)}
@@ -1888,7 +1934,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             />
 
             {/* Library Picker */}
-            {showPicker && folderId && (
+            {showPicker && activeFolderId && (
                 <LibraryPicker
                     onPick={handlePickItems}
                     onCancel={() => setShowPicker(false)}

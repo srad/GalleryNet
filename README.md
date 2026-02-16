@@ -51,6 +51,7 @@
 - **Favorites** &mdash; Mark items as favorites to quickly access your best shots in a dedicated view
 - **Video Support** &mdash; Full video upload with intelligent frame extraction via ffmpeg for thumbnails, hashing, and feature vectors
 - **Virtual Folders** &mdash; Organize media into folders without moving files. Many-to-many: one photo can live in multiple folders
+- **Deep Linking** &mdash; Direct URLs for folders, favorites, and individual media items. Modals and search states are bookmarkable.
 - **Batch Operations** &mdash; Multi-select with marquee (rubber-band) selection, batch download as zip, batch delete, batch add-to-folder
 - **EXIF Metadata** &mdash; View camera details, date taken, GPS, exposure, and more in the detail modal
 - **Password Protection** &mdash; Optional authentication via a single environment variable
@@ -60,10 +61,12 @@
 
 ### Gallery
 - Fully responsive layout &mdash; works on smartphones, tablets, and desktops
+- Route-based navigation &mdash; supports browser history, back/forward buttons, and deep links
 - Infinite-scroll grid with lazy-loaded thumbnails
 - Filter by media type (All / Photos / Videos)
 - Sort by date (Newest / Oldest) based on EXIF original date
 - Full-size media viewer with EXIF detail panel, keyboard navigation, and touch swipe
+- Deep-linked modals &mdash; share links directly to specific media items via `?media=<id>`
 
 ### Favorites
 - Mark any photo or video as a favorite with a single click

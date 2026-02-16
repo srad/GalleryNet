@@ -33,19 +33,20 @@ src/
 └── main.rs          # Wiring, config, server startup
 
 frontend/src/
-├── App.tsx              # Root component — tab routing, filter state, refresh key, upload progress, beforeunload guard, auth gate, folder navigation, mobile sidebar toggle + header bar
+├── App.tsx              # Root component — Route-based view switching, global auth/init guard, sidebar state
 ├── auth.ts              # Auth utilities: apiFetch (401-intercepting fetch wrapper), fireUnauthorized event dispatcher
 ├── types.ts             # Shared types: MediaItem, MediaFilter, UploadProgress, Folder
 └── components/
     ├── Icons.tsx        # Inline SVG icons (PhotoIcon, UploadIcon, SearchIcon, TagIcon)
+    ├── LoadingIndicator.tsx # Standardized spinner component (inline, centered, and overlay variants)
     ├── TagFilter.tsx    # Tag filter dropdown with search, multi-select checkboxes, badge count, item count per tag
     ├── TagInput.tsx     # Tag editor with autocomplete suggestions, create-new-tag, keyboard nav
     ├── LoginView.tsx    # Password login form — shown when unauthenticated
     ├── MediaCard.tsx    # Thumbnail card with lazy loading, video play badge, hover overlay, selection checkbox
     ├── MediaModal.tsx   # Full-size media viewer with detail panel, EXIF data, keyboard navigation
-    ├── Sidebar.tsx      # Navigation + server stats panel (counts, disk space, version)
-    ├── GalleryView.tsx  # Infinite-scroll grid with sort toggle, multi-select, batch ops, inline upload, library picker
-    └── SearchView.tsx   # Visual similarity search with reference image + similarity slider
+    ├── Sidebar.tsx      # Navigation (Link-based) + server stats panel (counts, disk space, version)
+    ├── GalleryView.tsx  # Infinite-scroll grid with route-based filtering, marquee selection, batch ops, and library picker
+    └── SearchView.tsx   # Reactive visual search with URL-synced similarity and reference selection
 ```
 
 ## Key Technical Details
@@ -227,26 +228,18 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 ## Frontend Architecture
 
 - **Responsive layout**: Fully responsive across smartphones, tablets, and desktops. Sidebar is an off-canvas drawer on mobile (`<md`) triggered by a hamburger menu in a fixed top header bar; on desktop (`md:`) it's a static sidebar. Toolbar controls wrap on small screens with icon-only buttons at `<sm` and text labels at `sm:`. Grid columns scale from 2 (mobile) to 8 (xl). `MediaModal` uses reduced padding on mobile with touch swipe navigation. Selection toolbar is full-width on mobile, centered pill on desktop. All padding values are tiered (`p-4`/`p-8`) using Tailwind responsive prefixes.
-- **Auth gate**: `App` checks `/api/auth-check` on mount. If auth is required and user is not authenticated, shows `LoginView` instead of the main app. All API calls use `apiFetch()` from `auth.ts` which fires a `gallerynet-unauthorized` custom window event on 401 responses, causing `App` to switch back to the login screen. Upload XHRs check for 401 explicitly and call `fireUnauthorized()`.
+- **Auth gate**: `App` checks `/api/auth-check` and fetches folders during a global `init` sequence. UI rendering is blocked until authentication status is known and initial metadata is available, preventing layout flickering. All API calls use `apiFetch()` from `auth.ts` which fires a `gallerynet-unauthorized` custom window event on 401 responses, causing `App` to switch back to the login screen.
+- **Route-based Navigation**: Uses `react-router-dom` for all views. Main gallery at `/`, favorites at `/favorites`, search at `/search`, and folders at `/folders/:id`. Browser back/forward buttons and bookmarks are fully supported.
+- **Persistent views**: Main tab views (`GalleryView`, `SearchView`) are kept mounted via `className="hidden"` logic driven by the current route. This ensures that long-running background tasks like **active uploads** persist even when navigating between different sections of the app.
+- **Media detail modal**: `MediaModal` is triggered by the `?media={id}` query parameter. This allows direct deep-linking to specific images. If the linked item isn't in the current grid, it is fetched independently via `GET /api/media/{id}`. Supports keyboard navigation, touch swipes, and browser history (closing the modal goes "Back").
+- **Reactive Visual Search**: The search view is fully automated. Results refresh instantly whenever the reference image changes (via file upload or "Select from Library") or the similarity slider is adjusted. Search parameters (source ID and similarity threshold) are synced to the URL.
 - **Infinite scroll**: `GalleryView` uses `IntersectionObserver` with `root: null` (viewport) and 400px `rootMargin` to pre-fetch the next page. Pages are 60 items. Race condition protection via fetch ID counter and refs for mutable pagination state.
 - **Lazy loading**: Thumbnail `<img>` tags use `loading="lazy"` and `decoding="async"`.
-- **Media type filter**: Segmented button (All / Photos / Videos) triggers API re-fetch with `media_type` query param. Resets pagination on change. Persisted to `localStorage`.
+- **Media type filter**: Segmented button (All / Photos / Videos) triggers route-based re-fetch with `media_type` query param. Resets pagination on change. Persisted to `localStorage`.
 - **Sort order**: Toggle button (Newest / Oldest) sends `sort=asc|desc` to API. Sorted by `original_date`. Persisted to `localStorage`.
-- **Group by Similarity**: Toggle button switches view to grouped mode. Fetches clusters from `/api/media/group`. Includes a similarity slider (50-99%) that fires on pointer release (not during drag). Shows a "Computing similarity groups..." overlay while the server processes. All toolbar controls and sidebar navigation are disabled during computation. Renders grid as sections with headers (Group 1, Group 2...).
-- **Gentle merge on upload**: When `refreshKey` changes after upload, new items are merged into the existing grid without resetting scroll position. Full reset only on filter/sort changes.
-- **Persistent views**: All tab views (`GalleryView`, `SearchView`) are always mounted with `className="hidden"` toggling, so upload state (queue, XHRs, progress) persists across tab switches.
-- **Upload queue**: Managed locally within `GalleryView` (inline). Files upload individually (one per HTTP request) with concurrency limit of 3. Per-file states: pending → uploading → done / duplicate / error. Duplicates (HTTP 409) show amber "Skipped" indicator.
-- **Upload progress**: Inline within `GalleryView` (top of grid). Shows counts (done/skipped/failed) and a progress bar. No longer global/sidebar-based.
-- **Beforeunload guard**: `GalleryView` registers `beforeunload` listener during group computation to prevent accidental page closure.
-- **Stats sidebar**: Fetches `/api/stats` on load and after each upload. Shows file counts, storage used, disk free space with color-coded bar, and app version.
-- **Video indicators**: Cards detect video by file extension and show a translucent play button overlay.
-- **Favorites**: Dedicated sidebar tab showing only favorite items. Toggle button on media cards (heart icon) and in the detail modal.
-- **Refresh key pattern**: `App` holds a `refreshKey` counter incremented after uploads. Both `GalleryView` and `Sidebar` re-fetch when it changes.
-- **Media detail modal**: `MediaModal` shows full-size image/video with a detail panel. Fetches full `MediaItem` via `GET /api/media/{id}` to display EXIF data (collapsible table). Keyboard navigation (Arrow Left/Right, Escape), prev/next buttons, backdrop click to close, touch swipe left/right for mobile navigation. Selected item tracked by `filename` (stable across grid mutations).
-- **Multi-select & batch operations**: `GalleryView` has a "Select" toggle button that enters selection mode. In selection mode, clicking a card toggles its selection (blue checkbox overlay on `MediaCard`). Shift-click selects a range. Floating toolbar appears at the bottom with: count display, select all/deselect all, download (single file or zip with streamed progress overlay), delete (with confirmation dialog), and cancel. Escape key exits selection mode. Selection mode auto-closes after successful download or delete. Selection state is cleared on filter/sort changes.
-- **Marquee (rubber-band) selection**: Click and drag on the grid background to draw a selection rectangle (like Windows Explorer). Cards intersecting the rectangle are live-selected as you drag. Automatically enters selection mode when a drag starts. Hold Ctrl/Cmd while dragging to add to existing selection. Uses absolute page coordinates with scroll offset for accurate hit-testing. 5px deadzone prevents accidental marquee on normal clicks. Each `MediaCard` has a `data-filename` attribute for DOM-based intersection detection.
-- **Download progress**: Batch download streams the response via `ReadableStream` and shows a modal overlay with spinner, progress bar (when `Content-Length` is available), and received/total byte counts. Zip filename format: `gallerynet_<count>_<YYYYMMDD_HHMMSS>.zip`.
-- **Virtual folders**: Organizational folders (many-to-many relationship with media). Sidebar shows folder list with item counts, inline "New folder" input, and delete (X) button per folder. Clicking a folder opens a folder-specific `GalleryView` (fetches from `/api/folders/{id}/media`) with a back button, folder name header, and inline upload button. Also features an "Add from Library" button that opens a `LibraryPicker` modal (reusing `GalleryView` logic) to add existing media. Selection toolbar includes "Add to folder" dropdown picker (available in both main gallery and folder views) and "Remove from folder" button (only in folder view). Deleting a folder removes only the folder and associations, not the actual media files. Folder list refreshes on upload completion and folder mutations. Folders are drag-to-reorder via native HTML5 drag-and-drop with a grip handle; order is persisted via `PUT /api/folders/reorder` and stored in the `sort_order` column.
+- **Group by Similarity**: Toggle button switches view to grouped mode. Fetches clusters from `/api/media/group`. Includes a similarity slider (50-99%) that fires on pointer release. Shows a standardized `LoadingIndicator` overlay while processing.
+- **Standardized Loading**: Global `LoadingIndicator.tsx` provides consistent visual feedback for initial app load, pagination, similarity search, and batch actions.
+- **Virtual folders**: Organizational folders (many-to-many relationship with media). Sidebar shows folder list with Link-based navigation. Features an "Add from Library" button that opens a `LibraryPicker` modal. `LibraryPicker` supports a `singleSelect` mode specifically for choosing search references. Folders are drag-to-reorder via native HTML5 drag-and-drop.
 
 ## Dependencies
 

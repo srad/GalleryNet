@@ -522,16 +522,16 @@ async fn get_auto_tags_count_handler(
 #[derive(Deserialize)]
 pub struct LearnTagRequest {
     pub tag_name: String,
-    pub positive_ids: Vec<Uuid>,
 }
 
 async fn learn_tag_handler(
     State(state): State<AppState>,
     Json(body): Json<LearnTagRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
-    let count = state.tag_learning_use_case.learn_tag(&body.tag_name, body.positive_ids)?;
+    let count = state.tag_learning_use_case.learn_tag(&body.tag_name)?;
     Ok(Json(json!({ "auto_tagged_count": count })))
 }
+
 
 #[derive(Deserialize)]
 pub struct AutoTagRequest {

@@ -155,11 +155,52 @@ impl SqliteRepository {
                 tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
                 weights BLOB NOT NULL,
                 bias REAL NOT NULL,
+                platt_a REAL NOT NULL DEFAULT -2.0,
+                platt_b REAL NOT NULL DEFAULT 0.0,
+                trained_at_count INTEGER NOT NULL DEFAULT 0,
                 version INTEGER NOT NULL DEFAULT 1
             )",
             [],
         )
         .map_err(|e| DomainError::Database(format!("Failed to create tag_models table: {}", e)))?;
+
+        // Migration for trained_at_count
+        let has_trained_at_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tag_models') WHERE name='trained_at_count'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if has_trained_at_count == 0 {
+            println!("Adding trained_at_count column to tag_models...");
+            let _ = conn.execute(
+                "ALTER TABLE tag_models ADD COLUMN trained_at_count INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+
+        // Migration for Platt scaling coefficients
+        let has_platt_a: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tag_models') WHERE name='platt_a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if has_platt_a == 0 {
+            println!("Adding Platt scaling columns to tag_models...");
+            let _ = conn.execute(
+                "ALTER TABLE tag_models ADD COLUMN platt_a REAL NOT NULL DEFAULT -2.0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE tag_models ADD COLUMN platt_b REAL NOT NULL DEFAULT 0.0",
+                [],
+            );
+        }
 
         println!("Ensuring idx_media_tags_tag_id index exists...");
         conn.execute(
@@ -369,8 +410,27 @@ impl MediaRepository for SqliteRepository {
     }
 
     // --- Tag Learning ---
-    fn save_tag_model(&self, tag_id: i64, weights: &[f64], bias: f64) -> Result<(), DomainError> {
-        self.save_tag_model_impl(tag_id, weights, bias)
+    fn get_tag_model(
+        &self,
+        tag_id: i64,
+    ) -> Result<Option<crate::domain::TrainedTagModel>, DomainError> {
+        self.get_tag_model_impl(tag_id)
+    }
+
+    fn save_tag_model(
+        &self,
+        tag_id: i64,
+        weights: &[f64],
+        bias: f64,
+        platt_a: f64,
+        platt_b: f64,
+        trained_at_count: usize,
+    ) -> Result<(), DomainError> {
+        self.save_tag_model_impl(tag_id, weights, bias, platt_a, platt_b, trained_at_count)
+    }
+
+    fn get_last_trained_count(&self, tag_id: i64) -> Result<usize, DomainError> {
+        self.get_last_trained_count_impl(tag_id)
     }
 
     fn get_tags_with_manual_counts(&self) -> Result<Vec<(i64, String, usize)>, DomainError> {
@@ -402,8 +462,21 @@ impl MediaRepository for SqliteRepository {
         self.get_random_embeddings_impl(limit, exclude_ids)
     }
 
+    fn get_nearest_embeddings(
+        &self,
+        vector: &[f32],
+        limit: usize,
+        exclude_ids: &[uuid::Uuid],
+    ) -> Result<Vec<(uuid::Uuid, Vec<f32>)>, DomainError> {
+        self.get_nearest_embeddings_impl(vector, limit, exclude_ids)
+    }
+
     fn get_tag_id_by_name(&self, name: &str) -> Result<Option<i64>, DomainError> {
         self.get_tag_id_by_name_impl(name)
+    }
+
+    fn get_tag_name_by_id(&self, tag_id: i64) -> Result<Option<String>, DomainError> {
+        self.get_tag_name_by_id_impl(tag_id)
     }
 
     fn get_manual_positives(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError> {

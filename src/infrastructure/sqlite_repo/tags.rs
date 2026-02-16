@@ -27,11 +27,62 @@ impl SqliteRepository {
         })
     }
 
+    pub(crate) fn get_tag_model_impl(
+        &self,
+        tag_id: i64,
+    ) -> Result<Option<crate::domain::TrainedTagModel>, DomainError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT weights, bias, platt_a, platt_b FROM tag_models WHERE tag_id = ?1")
+                .map_err(|e| DomainError::Database(e.to_string()))?;
+
+            let result = stmt.query_row(params![tag_id], |row| {
+                let weights_bytes: Vec<u8> = row.get(0)?;
+                let bias: f64 = row.get(1)?;
+                let platt_a: f64 = row.get(2)?;
+                let platt_b: f64 = row.get(3)?;
+
+                if weights_bytes.len() % 8 != 0 {
+                    return Err(rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Blob,
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Invalid weights length",
+                        )),
+                    ));
+                }
+
+                let mut weights = Vec::with_capacity(weights_bytes.len() / 8);
+                for chunk in weights_bytes.chunks_exact(8) {
+                    let arr: [u8; 8] = chunk.try_into().unwrap();
+                    weights.push(f64::from_ne_bytes(arr));
+                }
+
+                Ok(crate::domain::TrainedTagModel {
+                    weights,
+                    bias,
+                    platt_a,
+                    platt_b,
+                })
+            });
+
+            match result {
+                Ok(model) => Ok(Some(model)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(DomainError::Database(e.to_string())),
+            }
+        })
+    }
+
     pub(crate) fn save_tag_model_impl(
         &self,
         tag_id: i64,
         weights: &[f64],
         bias: f64,
+        platt_a: f64,
+        platt_b: f64,
+        trained_at_count: usize,
     ) -> Result<(), DomainError> {
         self.with_conn(|conn| {
             let weights_bytes: Vec<u8> = weights
@@ -40,12 +91,25 @@ impl SqliteRepository {
                 .collect();
 
             conn.execute(
-                "INSERT OR REPLACE INTO tag_models (tag_id, weights, bias, version) 
-                 VALUES (?1, ?2, ?3, COALESCE((SELECT version FROM tag_models WHERE tag_id = ?1), 0) + 1)",
-                params![tag_id, weights_bytes, bias],
+                "INSERT OR REPLACE INTO tag_models (tag_id, weights, bias, platt_a, platt_b, trained_at_count, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE((SELECT version FROM tag_models WHERE tag_id = ?1), 0) + 1)",
+                params![tag_id, weights_bytes, bias, platt_a, platt_b, trained_at_count as i64],
             )
             .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
+        })
+    }
+
+    pub(crate) fn get_last_trained_count_impl(&self, tag_id: i64) -> Result<usize, DomainError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT trained_at_count FROM tag_models WHERE tag_id = ?1")
+                .map_err(|e| DomainError::Database(e.to_string()))?;
+
+            let count: i64 = stmt
+                .query_row(params![tag_id], |row| row.get(0))
+                .unwrap_or(0);
+            Ok(count as usize)
         })
     }
 
@@ -215,6 +279,26 @@ impl SqliteRepository {
             tx.commit()
                 .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
+        })
+    }
+
+    pub(crate) fn get_tag_name_by_id_impl(
+        &self,
+        tag_id: i64,
+    ) -> Result<Option<String>, DomainError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT name FROM tags WHERE id = ?1")
+                .map_err(|e| DomainError::Database(e.to_string()))?;
+            let mut rows = stmt
+                .query_map(params![tag_id], |row| row.get(0))
+                .map_err(|e| DomainError::Database(e.to_string()))?;
+
+            if let Some(row) = rows.next() {
+                Ok(Some(row.map_err(|e| DomainError::Database(e.to_string()))?))
+            } else {
+                Ok(None)
+            }
         })
     }
 
@@ -651,7 +735,8 @@ mod tests {
         let weights = vec![0.1, -0.2, 0.5, 1.5];
         let bias = 0.75;
 
-        repo.save_tag_model_impl(1, &weights, bias).unwrap();
+        repo.save_tag_model_impl(1, &weights, bias, -2.0, 0.0, 0)
+            .unwrap();
 
         repo.with_conn(|conn| {
             let mut stmt = conn

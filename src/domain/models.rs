@@ -65,3 +65,11 @@ pub struct MediaGroup {
     pub id: usize,
     pub items: Vec<MediaSummary>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrainedTagModel {
+    pub weights: Vec<f64>,
+    pub bias: f64,
+    pub platt_a: f64,
+    pub platt_b: f64,
+}

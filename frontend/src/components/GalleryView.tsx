@@ -82,6 +82,7 @@ interface GalleryViewProps {
 }
 
 type SortOrder = 'desc' | 'asc';
+type SortField = 'date' | 'size';
 
 const PAGE_SIZE = 60;
 
@@ -118,6 +119,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         const saved = localStorage.getItem('gallerySortOrder');
         return saved === 'asc' ? 'asc' : 'desc';
     });
+    const [sortBy, setSortBy] = useState<SortField>(() => {
+        const saved = localStorage.getItem('gallerySortBy');
+        return saved === 'size' ? 'size' : 'date';
+    });
+    const [showSortMenu, setShowSortMenu] = useState(false);
+    const sortMenuRef = useRef<HTMLDivElement>(null);
     const [viewFavorites, setViewFavorites] = useState(favoritesOnly || false);
     const [filterTags, setFilterTags] = useState<string[]>([]);
     // Removed local selectedFilename state in favor of URL param
@@ -211,6 +218,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const isLoadingRef = useRef(false);
     const hasMoreRef = useRef(true);
     const sortOrderRef = useRef<SortOrder>(sortOrder);
+    const sortByRef = useRef<SortField>(sortBy);
     const prevRefreshKeyRef = useRef(refreshKey);
     const mediaRef = useRef<MediaItem[]>(media);
     mediaRef.current = media;
@@ -361,7 +369,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     }, [isGrouped, fetchGroups]);
 
     // --- Fetch a single page ---
-    const fetchPage = useCallback(async (pageNum: number, currentFilter: MediaFilter, currentSort: SortOrder, append: boolean) => {
+    const fetchPage = useCallback(async (pageNum: number, currentFilter: MediaFilter, currentSort: SortOrder, append: boolean, currentSortBy?: SortField) => {
         const id = ++fetchIdRef.current;
         setIsLoading(true);
         isLoadingRef.current = true;
@@ -371,6 +379,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 page: pageNum,
                 limit: PAGE_SIZE,
                 sort: currentSort,
+                sort_by: currentSortBy || sortByRef.current,
                 media_type: currentFilter,
                 favorite: viewFavorites,
                 tags: filterTags,
@@ -409,6 +418,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 page: 1,
                 limit: currentCount,
                 sort: currentSort,
+                sort_by: sortByRef.current,
                 media_type: currentFilter,
                 favorite: viewFavorites,
                 tags: filterTags,
@@ -480,14 +490,27 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
 
         sortOrderRef.current = sortOrder;
+        sortByRef.current = sortBy;
         setMedia([]);
         pageRef.current = 1;
         setHasMore(true);
         hasMoreRef.current = true;
         setInitialLoad(true);
         exitSelectionMode();
-        fetchPage(1, filter, sortOrder, false);
-    }, [filter, sortOrder, fetchPage, exitSelectionMode, isGrouped, viewFavorites, filterTags]);
+        fetchPage(1, filter, sortOrder, false, sortBy);
+    }, [filter, sortOrder, sortBy, fetchPage, exitSelectionMode, isGrouped, viewFavorites, filterTags]);
+
+    // --- Close sort menu on outside click ---
+    useEffect(() => {
+        if (!showSortMenu) return;
+        const handler = (e: MouseEvent) => {
+            if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+                setShowSortMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [showSortMenu]);
 
     // --- Picker mode auto-select ---
     useEffect(() => {
@@ -1267,26 +1290,57 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
                     {/* Right: View Options */}
                     <div className="flex flex-wrap items-center gap-2">
-                        {/* Sort */}
-                        <button
-                            onClick={() => setSortOrder(s => {
-                                const next = s === 'desc' ? 'asc' : 'desc';
-                                localStorage.setItem('gallerySortOrder', next);
-                                return next;
-                            })}
-                            disabled={isBusy}
-                            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all active:scale-95"
-                            title={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
-                        >
-                             <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                {sortOrder === 'desc' ? (
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
-                                ) : (
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0l-3.75-3.75M17.25 21L21 17.25" />
-                                )}
-                            </svg>
-                            <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
-                        </button>
+                        {/* Sort dropdown */}
+                        <div className="relative" ref={sortMenuRef}>
+                            <button
+                                onClick={() => setShowSortMenu(v => !v)}
+                                disabled={isBusy}
+                                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all active:scale-95"
+                                title="Sort options"
+                            >
+                                <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    {sortOrder === 'desc' ? (
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
+                                    ) : (
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0l-3.75-3.75M17.25 21L21 17.25" />
+                                    )}
+                                </svg>
+                                <span className="hidden sm:inline">
+                                    {sortBy === 'date' ? (sortOrder === 'desc' ? 'Newest' : 'Oldest') : (sortOrder === 'desc' ? 'Largest' : 'Smallest')}
+                                </span>
+                                <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                </svg>
+                            </button>
+                            {showSortMenu && (
+                                <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-30 py-1">
+                                    {([
+                                        { field: 'date' as SortField, dir: 'desc' as SortOrder, label: 'Newest first' },
+                                        { field: 'date' as SortField, dir: 'asc' as SortOrder, label: 'Oldest first' },
+                                        { field: 'size' as SortField, dir: 'desc' as SortOrder, label: 'Largest first' },
+                                        { field: 'size' as SortField, dir: 'asc' as SortOrder, label: 'Smallest first' },
+                                    ]).map(opt => (
+                                        <button
+                                            key={`${opt.field}-${opt.dir}`}
+                                            onClick={() => {
+                                                setSortBy(opt.field);
+                                                setSortOrder(opt.dir);
+                                                localStorage.setItem('gallerySortBy', opt.field);
+                                                localStorage.setItem('gallerySortOrder', opt.dir);
+                                                setShowSortMenu(false);
+                                            }}
+                                            className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${
+                                                sortBy === opt.field && sortOrder === opt.dir
+                                                    ? 'bg-blue-50 text-blue-700 font-medium'
+                                                    : 'text-gray-700 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
 
                         <div className="w-px h-5 bg-gray-200 mx-1 hidden sm:block"></div>
 

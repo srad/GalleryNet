@@ -314,8 +314,9 @@ impl MediaRepository for SqliteRepository {
         favorite: bool,
         tags: Option<Vec<String>>,
         sort_asc: bool,
+        sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
-        self.find_all_impl(limit, offset, media_type, favorite, tags, sort_asc)
+        self.find_all_impl(limit, offset, media_type, favorite, tags, sort_asc, sort_by)
     }
 
     fn media_counts(&self) -> Result<MediaCounts, DomainError> {
@@ -391,9 +392,10 @@ impl MediaRepository for SqliteRepository {
         favorite: bool,
         tags: Option<Vec<String>>,
         sort_asc: bool,
+        sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
         self.find_all_in_folder_impl(
-            folder_id, limit, offset, media_type, favorite, tags, sort_asc,
+            folder_id, limit, offset, media_type, favorite, tags, sort_asc, sort_by,
         )
     }
 
@@ -543,5 +545,32 @@ pub(crate) fn normalize_vector(vector: &mut [f32]) {
         for v in vector.iter_mut() {
             *v *= inv;
         }
+    }
+}
+
+/// RAII guard for test databases. Creates the DB in the system temp directory
+/// and deletes it when dropped (even if the test panics).
+#[cfg(test)]
+pub(crate) struct TestDb {
+    pub path: String,
+    pub repo: SqliteRepository,
+}
+
+#[cfg(test)]
+impl TestDb {
+    pub fn new(prefix: &str) -> Self {
+        let path = std::env::temp_dir()
+            .join(format!("{}_{}.db", prefix, uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
+        let repo = SqliteRepository::new(&path).unwrap();
+        Self { path, repo }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDb {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
     }
 }

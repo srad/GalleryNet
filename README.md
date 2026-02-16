@@ -19,6 +19,8 @@
 
   <img src="https://img.shields.io/badge/ONNX_Runtime-MobileNetV3-green?style=flat-square" alt="ONNX Runtime">
 
+  <img src="https://img.shields.io/badge/tests-90-brightgreen?style=flat-square&logo=checkmarx&logoColor=white" alt="Tests">
+
   <a href="https://hub.docker.com/r/sedrad/gallerynet/tags">
     <img src="https://img.shields.io/docker/image-size/sedrad/gallerynet/v1?style=flat-square&logo=docker&logoColor=white&label=docker%20image%20size" alt="Docker Size">
   </a>

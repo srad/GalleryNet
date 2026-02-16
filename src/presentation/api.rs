@@ -86,8 +86,10 @@ pub struct Pagination {
     pub media_type: Option<String>,
     pub favorite: Option<bool>,
     pub tags: Option<String>, // Comma-separated
-    /// Sort direction for original_date: "asc" or "desc" (default "desc")
+    /// Sort direction: "asc" or "desc" (default "desc")
     pub sort: Option<String>,
+    /// Sort field: "date" or "size" (default "date")
+    pub sort_by: Option<String>,
 }
 
 async fn list_handler(
@@ -101,13 +103,14 @@ async fn list_handler(
     let page = if page < 1 { 1 } else { page };
 
     let sort_asc = pagination.sort.as_deref() == Some("asc");
+    let sort_by = pagination.sort_by.as_deref().unwrap_or("date");
     let favorite = pagination.favorite.unwrap_or(false);
 
     let tags = pagination.tags.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
 
-    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, tags, sort_asc).await?;
+    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, tags, sort_asc, sort_by).await?;
 
     Ok(Json(results))
 }
@@ -1217,6 +1220,8 @@ struct FolderPagination {
     limit: Option<usize>,
     media_type: Option<String>,
     sort: Option<String>,
+    /// Sort field: "date" or "size" (default "date")
+    sort_by: Option<String>,
     favorite: Option<bool>,
     tags: Option<String>,
 }
@@ -1230,13 +1235,14 @@ async fn list_folder_media_handler(
     let limit = pagination.limit.unwrap_or(20).min(MAX_PAGE_LIMIT);
     let offset = (page - 1) * limit;
     let sort_asc = pagination.sort.as_deref() == Some("asc");
+    let sort_by = pagination.sort_by.as_deref().unwrap_or("date");
     let favorite = pagination.favorite.unwrap_or(false);
 
     let tags = pagination.tags.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
 
-    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), favorite, tags, sort_asc)?;
+    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), favorite, tags, sort_asc, sort_by)?;
     Ok(Json(results))
 }
 

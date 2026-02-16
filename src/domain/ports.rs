@@ -50,6 +50,7 @@ pub trait MediaRepository: Send + Sync {
         favorite: bool,
         tags: Option<Vec<String>>,
         sort_asc: bool,
+        sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError>;
     fn media_counts(&self) -> Result<MediaCounts, DomainError>;
 
@@ -90,6 +91,7 @@ pub trait MediaRepository: Send + Sync {
         favorite: bool,
         tags: Option<Vec<String>>,
         sort_asc: bool,
+        sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError>;
     fn get_folder_media_files(
         &self,

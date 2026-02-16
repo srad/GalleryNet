@@ -210,7 +210,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `GET /api/tags/count?folder_id=...` — Count auto-tags in current view.
 - `POST /api/tags/learn` — Learn from manual tags. JSON body `{"tag_name":"..."}`. Trains a linear SVM on all manual positives for the tag, computes Platt calibration, and auto-tags the entire library.
 - `POST /api/tags/{id}/apply` — Apply learned tag model. Body `{"folder_id": "..."}`.
-- `GET /api/media?page=1&limit=20&media_type=image&sort=desc&tags=a,b` — Paginated media list. Optional `media_type` filter (`image` or `video`). Optional `sort` param (`asc` or `desc`, default `desc`). Optional `favorite=true`. Optional `tags` (comma-separated, AND filter). Sorted by `original_date`. Returns array of `MediaSummary`.
+- `GET /api/media?page=1&limit=20&media_type=image&sort=desc&sort_by=date&tags=a,b` — Paginated media list. Optional `media_type` filter (`image` or `video`). Optional `sort` param (`asc` or `desc`, default `desc`). Optional `sort_by` param (`date` or `size`, default `date`). Optional `favorite=true`. Optional `tags` (comma-separated, AND filter). Returns array of `MediaSummary`.
 - `GET /api/media/{id}` — Get full `MediaItem` by UUID, including `exif_json`. Returns 404 if not found.
 - `POST /api/media/{id}/favorite` — Toggle favorite status. JSON body `{"favorite": true/false}`. Returns 200.
 - `GET /api/stats` — Server statistics: `{version, total_files, total_images, total_videos, total_size_bytes, disk_free_bytes, disk_total_bytes}`.
@@ -224,7 +224,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `POST /api/folders` — Create folder. JSON body `{"name":"..."}`. Returns created folder. New folders get `sort_order = max + 1`.
 - `PUT /api/folders/reorder` — Reorder folders. JSON body `["folder_uuid1", "folder_uuid2", ...]` (ordered array of folder IDs). Sets `sort_order` to array index. Returns 204.
 - `DELETE /api/folders/{id}` — Delete folder (does NOT delete media files). Returns 204.
-- `GET /api/folders/{id}/media?page=&limit=&media_type=&sort=` — Paginated media list within a folder. Same params as `/api/media`.
+- `GET /api/folders/{id}/media?page=&limit=&media_type=&sort=&sort_by=` — Paginated media list within a folder. Same params as `/api/media`.
 - `POST /api/folders/{id}/media` — Add media to folder. JSON body `["uuid1","uuid2"]`. Uses `INSERT OR IGNORE` for idempotency.
 - `POST /api/folders/{id}/media/remove` — Remove media from folder. JSON body `{"media_ids":["uuid1"]}`.
 - `GET /api/folders/{id}/download` — Returns `DownloadPlan` for all media in folder. Large folders auto-split into multiple zip parts.
@@ -242,7 +242,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - **Infinite scroll**: `GalleryView` uses `IntersectionObserver` with `root: null` (viewport) and 400px `rootMargin` to pre-fetch the next page. Pages are 60 items. Race condition protection via fetch ID counter and refs for mutable pagination state.
 - **Lazy loading**: Thumbnail `<img>` tags use `loading="lazy"` and `decoding="async"`.
 - **Media type filter**: Segmented button (All / Photos / Videos) triggers route-based re-fetch with `media_type` query param. Resets pagination on change. Persisted to `localStorage`.
-- **Sort order**: Toggle button (Newest / Oldest) sends `sort=asc|desc` to API. Sorted by `original_date`. Persisted to `localStorage`.
+- **Sort order**: Dropdown menu with four options (Newest, Oldest, Largest, Smallest) sends `sort=asc|desc` and `sort_by=date|size` to API. Both field and direction are persisted to `localStorage`.
 - **Group by Similarity**: Toggle button switches view to grouped mode. Fetches clusters from `/api/media/group`. Includes a similarity slider (50-99%) that fires on pointer release. Shows a standardized `LoadingIndicator` overlay while processing.
 - **Standardized Loading**: Global `LoadingIndicator.tsx` provides consistent visual feedback for initial app load, pagination, similarity search, and batch actions.
 - **Virtual folders**: Organizational folders (many-to-many relationship with media). Sidebar shows folder list with Link-based navigation. Features an "Add from Library" button that opens a `LibraryPicker` modal. `LibraryPicker` supports a `singleSelect` mode specifically for choosing search references. Folders are drag-to-reorder via native HTML5 drag-and-drop. Supports **drag-and-drop of media items** directly from the gallery or search results into folders, with a success checkmark confirmation.

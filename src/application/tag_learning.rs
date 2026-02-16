@@ -528,12 +528,16 @@ mod tests {
 
     #[test]
     fn test_auto_tagging_summary_logic() {
-        let db_path = format!("test_summary_{}.db", Uuid::new_v4());
-        let repo = Arc::new(crate::infrastructure::SqliteRepository::new(&db_path).unwrap());
+        let db = crate::infrastructure::sqlite_repo::TestDb::new("test_summary");
+        let repo: Arc<dyn crate::domain::MediaRepository> = Arc::new(
+            // We need to create a fresh repo from the same path since TestDb owns one already
+            // Just use the TestDb's repo via a trait object
+            crate::infrastructure::SqliteRepository::new(&db.path).unwrap()
+        );
         let use_case = TagLearningUseCase::new(repo.clone());
         // 100 items: 15 manual positives, 80 negatives, 5 unlabeled positives
         let ids: Vec<Uuid> = (0..100).map(|_| Uuid::new_v4()).collect();
-        repo.with_conn(|conn| {
+        db.repo.with_conn(|conn| {
             for (i, id) in ids.iter().enumerate() {
                 conn.execute("INSERT INTO media (id, filename, original_filename, size_bytes, phash, uploaded_at, original_date) VALUES (?1, ?2, ?2, 100, 'abc', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')", params![id.as_bytes(), format!("{}.jpg", i)]).unwrap();
                 let mut v = vec![0.0f32; 1280];
@@ -561,8 +565,6 @@ mod tests {
         // Run again without changes — should use cached model and produce same result
         let result2 = use_case.run_auto_tagging(None).unwrap();
         assert_eq!(result.after, result2.after, "Second run should produce identical results (cached model)");
-
-        let _ = std::fs::remove_file(&db_path);
     }
 
     #[test]

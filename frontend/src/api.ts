@@ -86,6 +86,7 @@ export class ApiClient {
         page: number;
         limit: number;
         sort: 'asc' | 'desc';
+        sort_by?: 'date' | 'size';
         media_type?: MediaFilter;
         favorite?: boolean;
         tags?: string[];
@@ -96,6 +97,7 @@ export class ApiClient {
             limit: String(params.limit),
             sort: params.sort,
         });
+        if (params.sort_by && params.sort_by !== 'date') query.set('sort_by', params.sort_by);
         if (params.media_type && params.media_type !== 'all') query.set('media_type', params.media_type);
         if (params.favorite) query.set('favorite', 'true');
         if (params.tags && params.tags.length > 0) query.set('tags', params.tags.join(','));

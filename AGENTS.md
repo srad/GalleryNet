@@ -38,7 +38,7 @@ frontend/src/
 ├── types.ts             # Shared types: MediaItem, MediaFilter, UploadProgress, Folder
 └── components/
     ├── Icons.tsx        # Inline SVG icons (PhotoIcon, UploadIcon, SearchIcon, TagIcon)
-    ├── TagFilter.tsx    # Tag filter dropdown with search, multi-select checkboxes, badge count
+    ├── TagFilter.tsx    # Tag filter dropdown with search, multi-select checkboxes, badge count, item count per tag
     ├── TagInput.tsx     # Tag editor with autocomplete suggestions, create-new-tag, keyboard nav
     ├── LoginView.tsx    # Password login form — shown when unauthenticated
     ├── MediaCard.tsx    # Thumbnail card with lazy loading, video play badge, hover overlay, selection checkbox

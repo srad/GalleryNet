@@ -25,7 +25,7 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
     useEffect(() => {
         apiFetch('/api/tags')
             .then(res => res.ok ? res.json() : [])
-            .then(setAllTags)
+            .then((data: any[]) => setAllTags(data.map(d => d.name)))
             .catch(() => {});
     }, []);
 

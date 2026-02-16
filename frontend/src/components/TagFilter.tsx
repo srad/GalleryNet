@@ -8,8 +8,13 @@ interface TagFilterProps {
     refreshKey?: number;
 }
 
+interface TagCount {
+    name: string;
+    count: number;
+}
+
 export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFilterProps) {
-    const [allTags, setAllTags] = useState<string[]>([]);
+    const [allTags, setAllTags] = useState<TagCount[]>([]);
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const wrapperRef = useRef<HTMLDivElement>(null);
@@ -24,7 +29,7 @@ export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFil
     const filteredTags = useMemo(() => {
         if (!searchTerm) return allTags;
         const lower = searchTerm.toLowerCase();
-        return allTags.filter(t => t.toLowerCase().includes(lower));
+        return allTags.filter(t => t.name.toLowerCase().includes(lower));
     }, [allTags, searchTerm]);
 
     const toggleTag = (tag: string) => {
@@ -87,7 +92,8 @@ export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFil
                                 {allTags.length === 0 ? "No tags found" : "No matching tags"}
                             </div>
                         ) : (
-                            filteredTags.map(tag => {
+                            filteredTags.map(tagObj => {
+                                const tag = tagObj.name;
                                 const isSelected = selectedTags.includes(tag);
                                 return (
                                     <button
@@ -108,7 +114,8 @@ export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFil
                                                 </svg>
                                             )}
                                         </div>
-                                        <span className="truncate">{tag}</span>
+                                        <span className="truncate flex-1">{tag}</span>
+                                        <span className="text-xs text-gray-400 ml-2">({tagObj.count})</span>
                                     </button>
                                 );
                             })

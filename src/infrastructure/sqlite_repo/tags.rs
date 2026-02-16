@@ -5,18 +5,27 @@ use uuid::Uuid;
 use super::SqliteRepository;
 
 impl SqliteRepository {
-    pub(crate) fn get_all_tags_impl(&self) -> Result<Vec<String>, DomainError> {
+    pub(crate) fn get_all_tags_impl(
+        &self,
+    ) -> Result<Vec<crate::domain::models::TagCount>, DomainError> {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT DISTINCT t.name FROM tags t
+                    "SELECT t.name, COUNT(mt.media_id)
+                     FROM tags t
                      JOIN media_tags mt ON mt.tag_id = t.id
+                     GROUP BY t.id, t.name
                      ORDER BY t.name",
                 )
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
             let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
+                .query_map([], |row| {
+                    Ok(crate::domain::models::TagCount {
+                        name: row.get(0)?,
+                        count: row.get(1)?,
+                    })
+                })
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
             let mut tags = Vec::new();

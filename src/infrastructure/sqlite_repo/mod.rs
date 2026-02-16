@@ -264,7 +264,9 @@ impl SqliteRepository {
 
 // ---- MediaRepository trait implementation (delegates to submodule _impl methods) ----
 
-use crate::domain::{Folder, MediaCounts, MediaItem, MediaRepository, MediaSummary, TagDetail};
+use crate::domain::{
+    Folder, MediaCounts, MediaItem, MediaRepository, MediaSummary, TagCount, TagDetail,
+};
 
 impl MediaRepository for SqliteRepository {
     fn save_metadata_and_vector(
@@ -324,7 +326,7 @@ impl MediaRepository for SqliteRepository {
         self.set_favorite_impl(id, favorite)
     }
 
-    fn get_all_tags(&self) -> Result<Vec<String>, DomainError> {
+    fn get_all_tags(&self) -> Result<Vec<TagCount>, DomainError> {
         self.get_all_tags_impl()
     }
 

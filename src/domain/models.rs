@@ -67,6 +67,12 @@ pub struct MediaGroup {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagCount {
+    pub name: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrainedTagModel {
     pub weights: Vec<f64>,
     pub bias: f64,

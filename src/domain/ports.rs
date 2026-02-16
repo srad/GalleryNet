@@ -55,7 +55,7 @@ pub trait MediaRepository: Send + Sync {
 
     fn set_favorite(&self, id: uuid::Uuid, favorite: bool) -> Result<(), DomainError>;
 
-    fn get_all_tags(&self) -> Result<Vec<String>, DomainError>;
+    fn get_all_tags(&self) -> Result<Vec<super::models::TagCount>, DomainError>;
     fn update_media_tags(&self, id: uuid::Uuid, tags: Vec<String>) -> Result<(), DomainError>;
     fn update_media_tags_batch(
         &self,

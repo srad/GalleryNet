@@ -50,9 +50,10 @@
 - **AI-Powered Tagging** &mdash; Tag 3+ examples and let a linear SVM with Platt-calibrated probabilities auto-tag your entire library.
 - **Favorites** &mdash; Mark items as favorites to quickly access your best shots in a dedicated view
 - **Video Support** &mdash; Full video upload with intelligent frame extraction via ffmpeg for thumbnails, hashing, and feature vectors
-- **Virtual Folders** &mdash; Organize media into folders without moving files. Many-to-many: one photo can live in multiple folders
+- **Virtual Folders** &mdash; Organize media into folders without moving files. Many-to-many: one photo can live in multiple folders. Supports **drag-and-drop** of media items directly into folders.
 - **Deep Linking** &mdash; Direct URLs for folders, favorites, and individual media items. Modals and search states are bookmarkable.
-- **Batch Operations** &mdash; Multi-select with marquee (rubber-band) selection, batch download as zip, batch delete, batch add-to-folder
+- **Batch Operations** &mdash; Multi-select with marquee (rubber-band) selection, keyboard shortcuts (`Ctrl+A`, `Delete`), batch download as zip, batch delete, batch add-to-folder
+
 - **EXIF Metadata** &mdash; View camera details, date taken, GPS, exposure, and more in the detail modal
 - **Password Protection** &mdash; Optional authentication via a single environment variable
 - **100% Self-Hosted** &mdash; Everything runs on your machine. No cloud. No telemetry. Your data stays yours.
@@ -63,7 +64,9 @@
 - Fully responsive layout &mdash; works on smartphones, tablets, and desktops
 - Route-based navigation &mdash; supports browser history, back/forward buttons, and deep links
 - Infinite-scroll grid with lazy-loaded thumbnails
+- **Keyboard Shortcuts** &mdash; Select all (`Ctrl+A`), delete (`Del`), navigation (`Arrows`, `Esc`)
 - Filter by media type (All / Photos / Videos)
+
 - Sort by date (Newest / Oldest) based on EXIF original date
 - Full-size media viewer with EXIF detail panel, keyboard navigation, and touch swipe
 - Deep-linked modals &mdash; share links directly to specific media items via `?media=<id>`
@@ -91,6 +94,7 @@
 
 ### Virtual Folders
 - Create folders to organize your media
+- **Drag-and-drop** items directly into folders from the gallery, search results, or detail modal
 - Add selected items to any folder from the gallery toolbar
 - Each folder has its own gallery view with filtering and sorting
 - Upload directly into a folder &mdash; media is added to the gallery and the folder
@@ -98,7 +102,9 @@
 
 ### Multi-Select & Batch Operations
 - Click "Select" or drag a marquee rectangle to select multiple items
+- **Keyboard support** &mdash; `Ctrl+A` to select all, `Delete` to batch delete or remove from folder
 - Shift-click for range selection, Ctrl/Cmd+drag for additive selection
+
 - Batch download as a single file or zip archive with streaming progress
 - Batch delete with confirmation
 - Add selection to any folder via dropdown picker

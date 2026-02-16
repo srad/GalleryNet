@@ -4,6 +4,7 @@ import { apiFetch } from '../auth';
 import { HeartIcon, TagIcon, SearchIcon } from './Icons';
 import TagInput from './TagInput';
 import ConfirmDialog from './ConfirmDialog';
+import LoadingIndicator from './LoadingIndicator';
 
 interface MediaModalProps {
     item: MediaItem;
@@ -154,7 +155,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                 )}
                 {onFindSimilar && item.id && (
                     <button 
-                        onClick={() => { if(item.id) { onFindSimilar(item.id); onClose(); } }} 
+                        onClick={() => { if(item.id) onFindSimilar(item.id); }} 
                         className="w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 backdrop-blur-md transition-colors"
                     >
                         <SearchIcon className="w-6 h-6" />
@@ -312,10 +313,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                     {/* Loading indicator for details */}
                     {item.id && !detail && (
                         <div className="mt-4 flex justify-center">
-                            <svg className="w-4 h-4 animate-spin text-white/40" viewBox="0 0 24 24" fill="none">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
+                            <LoadingIndicator size="sm" color="text-white/40" />
                         </div>
                     )}
 
@@ -340,10 +338,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                         {onFindSimilar && item.id && (
                             <button
                                 onClick={() => {
-                                    if (item.id) {
-                                        onFindSimilar(item.id);
-                                        onClose();
-                                    }
+                                    if (item.id) onFindSimilar(item.id);
                                 }}
                                 className="flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium rounded-lg bg-purple-500/20 text-purple-100 hover:bg-purple-500/30 hover:text-white transition-colors border border-purple-500/30"
                                 title="Find visually similar items"

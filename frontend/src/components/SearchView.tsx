@@ -1,37 +1,38 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { MediaItem } from '../types';
+import type { MediaItem, Folder } from '../types';
 import MediaCard from './MediaCard';
 import MediaModal from './MediaModal';
 import { apiFetch } from '../auth';
+import { LibraryPicker } from './GalleryView';
+import { PhotoIcon } from './Icons';
+import LoadingIndicator from './LoadingIndicator';
 
-export default function SearchView() {
+interface SearchViewProps {
+    folders: Folder[];
+    refreshKey: number;
+    onFoldersChanged: () => void;
+}
+
+export default function SearchView({ folders, refreshKey, onFoldersChanged }: SearchViewProps) {
     const [searchParams, setSearchParams] = useSearchParams();
     const sourceId = searchParams.get('source');
     const selectedMediaId = searchParams.get('media');
+    const similarityParam = searchParams.get('similarity');
 
     const [searchFile, setSearchFile] = useState<File | null>(null);
-    const [similarity, setSimilarity] = useState<number>(70);
+    const [localSimilarity, setLocalSimilarity] = useState<number>(() => 
+        similarityParam ? parseInt(similarityParam, 10) : 70
+    );
     const [searchResults, setSearchResults] = useState<MediaItem[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [activeId, setActiveId] = useState<string | null>(null);
+    const [showPicker, setShowPicker] = useState(false);
 
-    // Effect to handle prop changes (new search initiated from Gallery via URL)
-    useEffect(() => {
-        if (sourceId && sourceId !== activeId) {
-            setActiveId(sourceId);
-            setSearchFile(null);
-            handleSearchById(sourceId, similarity);
-        } else if (!sourceId && !searchFile) {
-            // Cleared via URL?
-            if (activeId) {
-                setActiveId(null);
-                setSearchResults([]);
-            }
-        }
-    }, [sourceId]);
+    // Track the last search criteria to prevent redundant searches
+    const lastSearchRef = useRef<{ source: string | null; file: File | null; sim: number } | null>(null);
 
-    const handleSearchById = async (id: string, sim: number) => {
+    const handleSearchById = useCallback(async (id: string, sim: number) => {
         setIsSearching(true);
         try {
             const res = await apiFetch(`/api/media/${id}/similar?similarity=${sim}`);
@@ -45,39 +46,85 @@ export default function SearchView() {
         } finally {
             setIsSearching(false);
         }
-    };
+    }, []);
 
-    const handleSearch = async () => {
-        if (activeId) {
-            // If we have an active ID, update the URL to reflect the search if not already
-            // (Though typically activeId comes FROM the URL)
-            handleSearchById(activeId, similarity);
-            return;
-        }
-
-        if (!searchFile) return alert('Please select a file to search with');
+    const handleSearchByFile = useCallback(async (file: File, sim: number) => {
         setIsSearching(true);
-
         const formData = new FormData();
-        formData.append('similarity', similarity.toString());
-        formData.append('file', searchFile);
+        formData.append('similarity', sim.toString());
+        formData.append('file', file);
 
         try {
             const res = await apiFetch('/api/search', { method: 'POST', body: formData });
-            const results = await res.json();
-            setSearchResults(results);
+            if (res.ok) {
+                const results = await res.json();
+                setSearchResults(results);
+            }
         } catch (e) {
             alert(`Search error: ${e}`);
         } finally {
             setIsSearching(false);
         }
-    };
+    }, []);
+
+    // Sync local slider state when URL param changes (e.g. back/forward navigation)
+    useEffect(() => {
+        if (similarityParam) {
+            const val = parseInt(similarityParam, 10);
+            if (!isNaN(val) && val !== localSimilarity) {
+                setLocalSimilarity(val);
+            }
+        }
+    }, [similarityParam]);
+
+    // Main search trigger effect
+    useEffect(() => {
+        const currentSim = similarityParam ? parseInt(similarityParam, 10) : localSimilarity;
+        
+        const currentSource = sourceId;
+        const currentFile = searchFile;
+
+        // Check if anything meaningful changed
+        const last = lastSearchRef.current;
+        const changed = !last || 
+                        last.source !== currentSource || 
+                        last.file !== currentFile || 
+                        last.sim !== currentSim;
+
+        if (!changed) return;
+
+        // Reset search results if source is cleared
+        if (!currentSource && !currentFile) {
+            setSearchResults([]);
+            setActiveId(null);
+            lastSearchRef.current = null;
+            return;
+        }
+
+        // Run the appropriate search
+        if (currentSource) {
+            setActiveId(currentSource);
+            setSearchFile(null);
+            handleSearchById(currentSource, currentSim);
+        } else if (currentFile) {
+            setActiveId(null);
+            handleSearchByFile(currentFile, currentSim);
+        }
+
+        lastSearchRef.current = { source: currentSource, file: currentFile, sim: currentSim };
+    }, [sourceId, similarityParam, searchFile, handleSearchById, handleSearchByFile]);
+
+    const handleSimilarityCommit = useCallback(() => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('similarity', localSimilarity.toString());
+            return next;
+        });
+    }, [localSimilarity, setSearchParams]);
 
     const clearSearch = () => {
-        setActiveId(null);
         setSearchFile(null);
         setSearchResults([]);
-        // Clear source param
         setSearchParams(prev => {
             const next = new URLSearchParams(prev);
             next.delete('source');
@@ -93,6 +140,17 @@ export default function SearchView() {
                 return next;
             });
         }
+    }, [setSearchParams]);
+
+    const handlePickItem = useCallback((ids: string[]) => {
+        if (ids.length > 0) {
+            setSearchParams(prev => {
+                const next = new URLSearchParams(prev);
+                next.set('source', ids[0]);
+                return next;
+            });
+        }
+        setShowPicker(false);
     }, [setSearchParams]);
 
     // Helper to get thumbnail URL
@@ -117,11 +175,8 @@ export default function SearchView() {
         if (!selectedMediaId) return null;
         
         const idx = searchResults.findIndex(m => m.id === selectedMediaId);
-        if (idx === -1) return null; // Item not in results? Maybe fetching full detail? 
-        // If searching via ID, the source item might not be in results (it's the query).
-        // But the user clicked a result.
-        
-        const item = searchResults[idx];
+        // Find item in results, or use deep linking logic if needed (handled by MediaModal anyway)
+        const item = idx !== -1 ? searchResults[idx] : { id: selectedMediaId, filename: '' } as MediaItem;
         const prevItem = idx > 0 ? searchResults[idx - 1] : undefined;
         const nextItem = idx < searchResults.length - 1 ? searchResults[idx + 1] : undefined;
 
@@ -140,20 +195,10 @@ export default function SearchView() {
                 onPrev={prevItem?.id ? () => handleSetMediaId(prevItem!.id!) : null}
                 onNext={nextItem?.id ? () => handleSetMediaId(nextItem!.id!) : null}
                 onFindSimilar={handleFindSimilar}
-                // Search view doesn't support favorite/delete/tags context fully yet or passed props?
-                // MediaModal handles specific item actions via API.
-                // We just need to handle the list updates if an item is deleted.
-                // For now, let's omit callback for delete to avoid complex state sync, 
-                // or just remove from local results.
                 onToggleFavorite={() => {
-                    // Optimistic update locally
+                    if (!item.id) return;
                     const newStatus = !item.is_favorite;
                     setSearchResults(prev => prev.map(m => m.id === item.id ? { ...m, is_favorite: newStatus } : m));
-                    // API call is handled inside MediaModal? No, MediaModal expects parent to handle it?
-                    // Wait, MediaModal renders buttons that call props. 
-                    // But in GalleryView we had `handleToggleFavorite`.
-                    // We need to duplicate that logic here or accept it as prop.
-                    // For simplicity, let's implement basic favorite toggle here.
                     apiFetch(`/api/media/${item.id}/favorite`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -169,81 +214,144 @@ export default function SearchView() {
             <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-4 md:mb-6 shrink-0">Visual Search</h2>
 
             <div className="bg-white border border-gray-200 p-4 sm:p-6 md:p-8 rounded-2xl shadow-sm mb-4 sm:mb-8 shrink-0">
-                <div className="flex flex-col md:flex-row gap-4 sm:gap-6 md:gap-8 items-start md:items-center">
+                <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 items-start lg:items-center">
                     <div className="flex-1 w-full">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Reference Image</label>
                         
                         {activeId ? (
-                            <div className="flex items-center gap-4 p-2 border border-gray-200 rounded-lg bg-gray-50">
+                            <div className="flex items-center gap-4 p-3 border border-gray-200 rounded-xl bg-gray-50">
                                 <img 
                                     src={getThumbnailUrl(activeId)} 
                                     alt="Reference" 
-                                    className="w-16 h-16 object-cover rounded-md"
+                                    className="w-16 h-16 object-cover rounded-lg shadow-sm"
                                 />
                                 <div className="flex-1">
                                     <p className="text-sm font-medium text-gray-900">Searching by selected image</p>
                                     <button 
                                         onClick={clearSearch}
-                                        className="text-xs text-red-600 hover:text-red-800 underline mt-1"
+                                        className="text-xs text-red-600 hover:text-red-800 font-semibold mt-1"
                                     >
-                                        Clear / Upload New
+                                        Clear / Pick New
+                                    </button>
+                                </div>
+                            </div>
+                        ) : searchFile ? (
+                            <div className="flex items-center gap-4 p-3 border border-gray-200 rounded-xl bg-gray-50">
+                                <div className="w-16 h-16 bg-purple-100 rounded-lg flex items-center justify-center">
+                                    <PhotoIcon className="w-8 h-8 text-purple-600" />
+                                </div>
+                                <div className="flex-1">
+                                    <p className="text-sm font-medium text-gray-900">{searchFile.name}</p>
+                                    <button 
+                                        onClick={clearSearch}
+                                        className="text-xs text-red-600 hover:text-red-800 font-semibold mt-1"
+                                    >
+                                        Clear / Pick New
                                     </button>
                                 </div>
                             </div>
                         ) : (
-                            <input
-                                type="file"
-                                accept="image/*"
-                                onChange={(e) => setSearchFile(e.target.files?.[0] || null)}
-                                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 cursor-pointer border border-gray-200 rounded-lg"
-                            />
+                            <div className="flex flex-col sm:flex-row gap-3">
+                                <button
+                                    onClick={() => setShowPicker(true)}
+                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 rounded-xl transition-all font-medium text-sm shadow-sm group"
+                                >
+                                    <PhotoIcon className="w-5 h-5 text-gray-400 group-hover:text-blue-500" />
+                                    Select from Library
+                                </button>
+                                <div className="relative flex-1">
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0] || null;
+                                            if (file) setSearchFile(file);
+                                        }}
+                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                    />
+                                    <div className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 hover:border-purple-400 hover:bg-purple-50 text-gray-700 rounded-xl transition-all font-medium text-sm shadow-sm">
+                                        <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                                        </svg>
+                                        Upload File
+                                    </div>
+                                </div>
+                            </div>
                         )}
                     </div>
 
-                    <div className="flex-1 w-full">
+                    <div className="w-full lg:w-72">
                         <label htmlFor="similarity" className="block text-sm font-medium text-gray-700 mb-2">
-                            Min Similarity: <span className="text-purple-600 font-bold">{similarity}%</span>
+                            Min Similarity: <span className="text-purple-600 font-bold">{localSimilarity}%</span>
                         </label>
                         <input
                             id="similarity"
                             type="range"
                             min="0"
                             max="100"
-                            value={similarity}
-                            onChange={(e) => setSimilarity(Number(e.target.value))}
+                            value={localSimilarity}
+                            onChange={(e) => setLocalSimilarity(Number(e.target.value))}
+                            onPointerUp={handleSimilarityCommit}
+                            onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') handleSimilarityCommit(); }}
                             className="w-full accent-purple-600 cursor-pointer h-2 bg-gray-200 rounded-lg appearance-none"
                         />
                     </div>
-
-                    <button
-                        onClick={handleSearch}
-                        disabled={isSearching || (!searchFile && !activeId)}
-                        className="mt-6 md:mt-0 whitespace-nowrap bg-purple-600 text-white px-8 py-3 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                    >
-                        {isSearching ? 'Searching...' : 'Find Matches'}
-                    </button>
                 </div>
             </div>
 
-            {searchResults.length > 0 ? (
-                <div className="flex-1 overflow-y-auto min-h-0">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 border-b pb-2 sticky top-0 bg-gray-50 z-10">
-                        Matches Found ({searchResults.length})
-                    </h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-4 md:gap-6 pb-8">
-                        {searchResults.map((item) => (
-                            <MediaCard 
-                                key={`search-${item.id}`} 
-                                item={item}
-                                onClick={() => handleCardClick(item)}
-                            />
-                        ))}
+            <div className="flex-1 relative min-h-0">
+                {isSearching && searchResults.length > 0 && (
+                    <LoadingIndicator 
+                        variant="overlay" 
+                        label="Updating results..." 
+                        color="text-purple-600" 
+                    />
+                )}
+
+                {searchResults.length > 0 ? (
+                    <div className="h-full overflow-y-auto">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-200 pb-2 sticky top-0 bg-gray-50 z-10 flex items-center justify-between">
+                            <span>Matches Found ({searchResults.length})</span>
+                            <span className="text-xs font-normal text-gray-400">Similarity &ge; {similarityParam || localSimilarity}%</span>
+                        </h3>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 pb-8">
+                            {searchResults.map((item) => (
+                                <MediaCard 
+                                    key={`search-${item.id}`} 
+                                    item={item}
+                                    onClick={() => handleCardClick(item)}
+                                />
+                            ))}
+                        </div>
                     </div>
-                </div>
-            ) : (
-                <div className="flex-1 flex items-center justify-center text-gray-400">
-                    {isSearching ? 'Analyzing...' : 'No matches found or no search initiated.'}
-                </div>
+                ) : (
+                    <div className="h-full flex items-center justify-center text-gray-400">
+                        {isSearching ? (
+                            <LoadingIndicator 
+                                variant="centered" 
+                                label="Analyzing library..." 
+                                size="lg" 
+                                color="text-purple-600" 
+                            />
+                        ) : (
+                            <div className="flex flex-col items-center gap-3">
+                                <PhotoIcon className="w-12 h-12 text-gray-200" />
+                                <span className="text-sm text-center max-w-xs">Select an image to find similar matches across your library.</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {showPicker && (
+                <LibraryPicker
+                    onPick={handlePickItem}
+                    onCancel={() => setShowPicker(false)}
+                    refreshKey={refreshKey}
+                    folders={folders}
+                    onFoldersChanged={onFoldersChanged}
+                    singleSelect={true}
+                />
             )}
 
             {renderModal()}

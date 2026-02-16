@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import GalleryView from './components/GalleryView';
 import SearchView from './components/SearchView';
 import LoginView from './components/LoginView';
+import LoadingIndicator from './components/LoadingIndicator';
 import { apiFetch } from './auth';
 
 type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
@@ -16,7 +17,8 @@ export default function App() {
     const [authState, setAuthState] = useState<AuthState>('loading');
     const [authRequired, setAuthRequired] = useState(false);
     const [folders, setFolders] = useState<Folder[]>([]);
-    const [foldersLoaded, setFoldersLoaded] = useState(false);
+    const [appReady, setAppReady] = useState(false);
+    const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     // Listen for 401 events from any API call
@@ -33,53 +35,58 @@ export default function App() {
     const [refreshKey, setRefreshKey] = useState(0);
     const [isBusy, setIsBusy] = useState(false);
 
-    // Check authentication status on mount
+    // Initial load: Check auth and fetch folders
     useEffect(() => {
-        fetch('/api/auth-check')
-            .then(res => {
+        const init = async () => {
+            setIsInitialLoading(true);
+            try {
+                const res = await fetch('/api/auth-check');
                 if (res.ok) {
-                    return res.json().then(data => {
-                        setAuthRequired(data.required ?? false);
-                        if (data.authenticated) {
-                            setAuthState('authenticated');
-                        } else {
-                            setAuthState('unauthenticated');
-                        }
-                    });
+                    const data = await res.json();
+                    setAuthRequired(data.required ?? false);
+                    if (data.authenticated) {
+                        setAuthState('authenticated');
+                        // Fetch folders immediately
+                        const fRes = await apiFetch('/api/folders');
+                        if (fRes.ok) setFolders(await fRes.json());
+                    } else {
+                        setAuthState('unauthenticated');
+                    }
                 } else {
                     setAuthRequired(true);
                     setAuthState('unauthenticated');
                 }
-            })
-            .catch(() => {
+            } catch (e) {
+                console.error('Init failed', e);
                 setAuthState('unauthenticated');
-            });
+            } finally {
+                setIsInitialLoading(false);
+                setAppReady(true);
+            }
+        };
+        init();
     }, []);
 
-    // Fetch folders when authenticated
+    // Re-fetch folders when refreshKey changes (uploads may affect counts)
     const fetchFolders = useCallback(async () => {
         try {
             const res = await apiFetch('/api/folders');
-            if (res.ok) {
-                setFolders(await res.json());
-            }
+            if (res.ok) setFolders(await res.json());
         } catch { /* ignore */ }
-        finally {
-            setFoldersLoaded(true);
-        }
     }, []);
 
     useEffect(() => {
-        if (authState === 'authenticated') fetchFolders();
-    }, [authState, fetchFolders]);
-
-    // Re-fetch folders when refreshKey changes (uploads may affect counts)
-    useEffect(() => {
-        if (authState === 'authenticated') fetchFolders();
+        if (authState === 'authenticated' && refreshKey > 0) fetchFolders();
     }, [refreshKey, authState, fetchFolders]);
 
-    const handleLogin = useCallback(() => {
+    const handleLogin = useCallback(async () => {
+        setIsInitialLoading(true);
         setAuthState('authenticated');
+        try {
+            const fRes = await apiFetch('/api/folders');
+            if (fRes.ok) setFolders(await fRes.json());
+        } catch { /* ignore */ }
+        setIsInitialLoading(false);
     }, []);
 
     const handleLogout = useCallback(async () => {
@@ -112,22 +119,20 @@ export default function App() {
     const activeFolderId = folderMatch?.params.folderId;
     const activeFolder = folders.find(f => f.id === activeFolderId) || null;
 
-    // Loading state
-    if (authState === 'loading' || (authState === 'authenticated' && !foldersLoaded)) {
+    // Loading state: Hide everything until we know the auth status AND have folders if authenticated
+    if (isInitialLoading || !appReady) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-50">
-                <div className="flex flex-col items-center gap-3">
-                    <svg className="w-8 h-8 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <div className="text-gray-400 text-sm font-medium">Loading GalleryNet...</div>
-                </div>
+                <LoadingIndicator 
+                    label="Loading GalleryNet..." 
+                    variant="centered" 
+                    size="lg" 
+                />
             </div>
         );
     }
 
-    // Login screen
+    // Login screen - only show after initial load finishes and we are definitely unauthenticated
     if (authState === 'unauthenticated') {
         return <LoginView onLogin={handleLogin} />;
     }
@@ -199,7 +204,11 @@ export default function App() {
                     </div>
 
                     <div className={isSearch ? 'p-4 md:p-8' : 'hidden'}>
-                        <SearchView />
+                        <SearchView 
+                            folders={folders} 
+                            refreshKey={refreshKey} 
+                            onFoldersChanged={fetchFolders}
+                        />
                     </div>
 
                     {isFolder && activeFolderId && (

@@ -7,6 +7,9 @@ import TagFilter from './TagFilter';
 import TagInput from './TagInput';
 import { apiFetch, fireUnauthorized } from '../auth';
 
+import ConfirmDialog from './ConfirmDialog';
+import AlertDialog from './AlertDialog';
+
 interface LibraryPickerProps {
     onPick: (ids: string[]) => void;
     onCancel: () => void;
@@ -98,10 +101,13 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
     const [showBatchTagModal, setShowBatchTagModal] = useState(false);
     const [batchTags, setBatchTags] = useState<string[]>([]);
-    const [isLearning, setIsLearning] = useState(false);
     const [isBatchTagging, setIsBatchTagging] = useState(false);
     const [isAutoTagging, setIsAutoTagging] = useState(false);
     const [autoTagProgress, setAutoTagProgress] = useState<{ current: number; total: number; label: string } | null>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const [showCancelAutoTagConfirm, setShowCancelAutoTagConfirm] = useState(false);
+    const [showStartAutoTagConfirm, setShowStartAutoTagConfirm] = useState(false);
+    const [autoTagResult, setAutoTagResult] = useState<{ title: string; message: string } | null>(null);
 
     // --- Grouping state ---
     const [isGrouped, setIsGrouped] = useState(false);
@@ -124,7 +130,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const [isAddingToFolder, setIsAddingToFolder] = useState(false);
 
     // True while the server is computing similarity groups or processing batch actions
-    const isBusy = (isGrouped && isLoading) || isLearning || isBatchTagging || isDeleting || isAddingToFolder || isAutoTagging;
+    const isBusy = (isGrouped && isLoading) || isBatchTagging || isDeleting || isAddingToFolder || isAutoTagging;
 
     // Notify parent when the busy state changes (for locking navigation)
     const prevBusyRef = useRef(false);
@@ -511,74 +517,36 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
     }, [batchTags, media, selected, exitSelectionMode, fetchPage, filter, sortOrder, onUploadComplete]);
 
-    const handleLearnTag = useCallback(async () => {
-        if (batchTags.length === 0) {
-            alert("Please enter a tag name to learn.");
-            return;
-        }
-        if (batchTags.length > 1) {
-            alert("Please enter exactly one tag name for training.");
-            return;
-        }
-        
-        const ids = media
-            .filter(m => selected.has(m.filename) && m.id)
-            .map(m => m.id!);
-            
-        if (ids.length < 2) {
-            alert("Please select at least 2 items to learn from.");
-            return;
-        }
-
-        setIsLearning(true);
-        try {
-            const res = await apiFetch('/api/tags/learn', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tag_name: batchTags[0], positive_ids: ids }),
-            });
-            
-            if (res.ok) {
-                const data = await res.json();
-                alert(`Learning complete! Automatically tagged ${data.auto_tagged_count} other items.`);
-                setShowBatchTagModal(false);
-                setBatchTags([]);
-                exitSelectionMode();
-                onUploadComplete?.(); // Trigger refresh
-            } else {
-                const err = await res.json();
-                alert(`Learning failed: ${err.error || 'Unknown error'}`);
-            }
-        } catch (e) {
-            console.error('Learn tag error', e);
-            alert('Failed to start learning');
-        } finally {
-            setIsLearning(false);
-        }
-    }, [batchTags, media, selected, exitSelectionMode, onUploadComplete]);
 
     const handleAutoTag = useCallback(async () => {
         setIsAutoTagging(true);
+        const ac = new AbortController();
+        abortControllerRef.current = ac;
         setAutoTagProgress({ current: 0, total: 0, label: 'Initializing...' });
         
         try {
             // 1. Get initial count
             const countParams = new URLSearchParams();
             if (folderId) countParams.set('folder_id', folderId);
-            const initialRes = await apiFetch(`/api/tags/count?${countParams}`);
+            const initialRes = await apiFetch(`/api/tags/count?${countParams}`, { signal: ac.signal });
             const initialCount = initialRes.ok ? (await initialRes.json()).count : 0;
 
+            if (ac.signal.aborted) return;
+
             // 2. Get models to process
-            const modelsRes = await apiFetch('/api/tags/models');
+            const modelsRes = await apiFetch('/api/tags/models', { signal: ac.signal });
             if (!modelsRes.ok) throw new Error('Failed to fetch trained models');
             const models: [number, string][] = await modelsRes.json();
             
             if (models.length === 0) {
-                alert('No auto-taggable tags found. Please manually tag at least 3 items with the same name first so the AI can learn what they look like!');
-                setIsAutoTagging(false);
-                setAutoTagProgress(null);
+                setAutoTagResult({
+                    title: "No Tag Models Found",
+                    message: "No auto-taggable tags found. Please manually tag at least 3 items with the same name first so the AI can learn what they look like!"
+                });
                 return;
             }
+
+            if (ac.signal.aborted) return;
 
             setAutoTagProgress({ current: 0, total: models.length, label: `Processing ${models[0][1]}...` });
 
@@ -586,6 +554,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             
             // 3. Process models one by one for progress feedback
             for (let i = 0; i < models.length; i++) {
+                if (ac.signal.aborted) break;
+
                 const [tagId, tagName] = models[i];
                 setAutoTagProgress({ current: i, total: models.length, label: `Applying "${tagName}"...` });
                 
@@ -594,36 +564,54 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ folder_id: folderId || null }),
+                        signal: ac.signal,
                     });
                     
                     if (!res.ok) {
                         const err = await res.json();
                         errors.push(`${tagName}: ${err.error || 'Unknown error'}`);
                     }
-                } catch (e) {
+                } catch (e: any) {
+                    if (e.name === 'AbortError') throw e;
                     errors.push(`${tagName}: Network error or crash`);
                 }
             }
 
+            if (ac.signal.aborted) return;
+
             setAutoTagProgress({ current: models.length, total: models.length, label: 'Finalizing...' });
             
             // 4. Get final count
-            const finalRes = await apiFetch(`/api/tags/count?${countParams}`);
+            const finalRes = await apiFetch(`/api/tags/count?${countParams}`, { signal: ac.signal });
             const finalCount = finalRes.ok ? (await finalRes.json()).count : 0;
 
-            let message = `Auto-tagging complete!\n\nTotal auto-tags before: ${initialCount}\nTotal auto-tags after: ${finalCount}\nChange: ${finalCount >= initialCount ? '+' : ''}${finalCount - initialCount}`;
+            let message = `Total auto-tags before: ${initialCount}\nTotal auto-tags after: ${finalCount}\nChange: ${finalCount >= initialCount ? '+' : ''}${finalCount - initialCount}`;
             
             if (errors.length > 0) {
                 message += `\n\nSome tags encountered issues:\n• ${errors.join('\n• ')}`;
             }
-            alert(message);
+            
+            setAutoTagResult({
+                title: "Auto-Tagging Complete",
+                message
+            });
             onUploadComplete?.(); // Refresh metadata
-        } catch (e) {
-            console.error('Auto-tag error', e);
-            alert('Auto-tagging failed');
+        } catch (e: any) {
+            if (e.name === 'AbortError') {
+                console.log('Auto-tagging cancelled');
+            } else {
+                console.error('Auto-tag error', e);
+                setAutoTagResult({
+                    title: "Error",
+                    message: "Auto-tagging failed. Please check the console for details."
+                });
+            }
         } finally {
-            setIsAutoTagging(false);
-            setAutoTagProgress(null);
+            if (abortControllerRef.current === ac) {
+                setIsAutoTagging(false);
+                setAutoTagProgress(null);
+                abortControllerRef.current = null;
+            }
         }
     }, [folderId, onUploadComplete]);
 
@@ -1204,14 +1192,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     {/* Auto-tag button */}
                     {!isPicker && (
                       <button
-                        onClick={handleAutoTag}
-                        disabled={isBusy}
+                        onClick={isAutoTagging ? () => setShowCancelAutoTagConfirm(true) : () => setShowStartAutoTagConfirm(true)}
+                        disabled={isBusy && !isAutoTagging}
                         className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors border disabled:opacity-50 disabled:pointer-events-none ${
                           isAutoTagging
-                            ? 'bg-indigo-50 text-indigo-600 border-indigo-200'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
                             : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
                         }`}
-                        title="Auto-tag current view using learned models"
+                        title={isAutoTagging ? "Cancel auto-tagging" : "Auto-tag current view using learned models"}
                       >
                           {isAutoTagging ? (
                             <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -1223,7 +1211,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
                             </svg>
                           )}
-                          <span className="hidden sm:inline">{isAutoTagging ? 'Tagging...' : 'Auto Tag'}</span>
+                          <span className="hidden sm:inline">{isAutoTagging ? 'Cancel' : 'Auto Tag'}</span>
                       </button>
                     )}
 
@@ -1311,7 +1299,6 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         </button>
                     )}
                 </div>
-            </div>
 
             {/* Auto-tag progress bar */}
             {autoTagProgress && (
@@ -1324,9 +1311,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                             </svg>
                             <span className="text-xs font-semibold text-indigo-900">{autoTagProgress.label}</span>
                         </div>
-                        <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
-                            {autoTagProgress.total > 0 ? Math.round((autoTagProgress.current / autoTagProgress.total) * 100) : 0}%
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
+                                {autoTagProgress.total > 0 ? Math.round((autoTagProgress.current / autoTagProgress.total) * 100) : 0}%
+                            </span>
+                        </div>
                     </div>
                     <div className="w-full bg-indigo-100/50 rounded-full h-1.5 overflow-hidden">
                         <div
@@ -1382,6 +1371,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     )}
                 </div>
             )}
+            </div>
 
             {/* Empty state — only after the initial load finishes with 0 results */}
             {!initialLoad && !isGrouped && media.length === 0 && (
@@ -1765,57 +1755,74 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                 value={batchTags}
                                 onChange={setBatchTags}
                                 placeholder="Enter tags..."
+                                autoFocus={true}
                             />
                         </div>
                         <div className="px-4 py-3 bg-gray-50 flex justify-end gap-2">
                             <button
                                 onClick={() => setShowBatchTagModal(false)}
-                                disabled={isBatchTagging || isLearning}
+                                disabled={isBatchTagging}
                                 className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={handleBatchTag}
-                                disabled={isBatchTagging || isLearning}
-                                className="px-3 py-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                            >
-                                {isBatchTagging ? (
-                                    <>
-                                        <svg className="w-3.5 h-3.5 animate-spin text-gray-500" viewBox="0 0 24 24" fill="none">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                                        </svg>
-                                        Saving...
-                                    </>
-                                ) : 'Apply Manually'}
-                            </button>
-                            <button
-                                onClick={handleLearnTag}
-                                disabled={isBatchTagging || isLearning}
+                                disabled={isBatchTagging}
                                 className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm disabled:opacity-50 transition-colors flex items-center gap-1.5"
                             >
-                                {isLearning ? (
+                                {isBatchTagging ? (
                                     <>
                                         <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                         </svg>
-                                        Learning...
+                                        Saving...
                                     </>
-                                ) : (
-                                    <>
-                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
-                                        </svg>
-                                        Smart Tag (Learn)
-                                    </>
-                                )}
+                                ) : 'Apply Tags'}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
+
+            {/* Start Auto Tag Confirmation */}
+            <ConfirmDialog
+                isOpen={showStartAutoTagConfirm}
+                title="Start Auto-Tagging?"
+                message="This process will analyze all media items in the current view and apply tags based on learned models. It may take a significant amount of time depending on the number of items and models."
+                confirmLabel="Start"
+                cancelLabel="Cancel"
+                isDestructive={false}
+                onConfirm={() => {
+                    handleAutoTag();
+                    setShowStartAutoTagConfirm(false);
+                }}
+                onCancel={() => setShowStartAutoTagConfirm(false)}
+            />
+
+            {/* Cancel Auto Tag Confirmation */}
+            <ConfirmDialog
+                isOpen={showCancelAutoTagConfirm}
+                title="Cancel Auto-Tagging?"
+                message="Are you sure you want to stop the auto-tagging process? Progress made so far will be saved."
+                confirmLabel="Yes, Stop"
+                cancelLabel="Continue Tagging"
+                isDestructive={true}
+                onConfirm={() => {
+                    abortControllerRef.current?.abort();
+                    setShowCancelAutoTagConfirm(false);
+                }}
+                onCancel={() => setShowCancelAutoTagConfirm(false)}
+            />
+
+            {/* Auto Tag Result Dialog */}
+            <AlertDialog
+                isOpen={!!autoTagResult}
+                title={autoTagResult?.title || ''}
+                message={autoTagResult?.message || ''}
+                onClose={() => setAutoTagResult(null)}
+            />
 
             {/* Library Picker */}
             {showPicker && folderId && (

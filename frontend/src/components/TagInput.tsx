@@ -7,9 +7,10 @@ interface TagInputProps {
     onChange: (tags: string[]) => void;
     placeholder?: string;
     readOnly?: boolean;
+    autoFocus?: boolean;
 }
 
-export default function TagInput({ value, onChange, placeholder = "Add tags...", readOnly = false }: TagInputProps) {
+export default function TagInput({ value, onChange, placeholder = "Add tags...", readOnly = false, autoFocus = false }: TagInputProps) {
     const [inputValue, setInputValue] = useState('');
     const [allTags, setAllTags] = useState<string[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -117,6 +118,7 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
                         }}
                         onKeyDown={handleKeyDown}
                         onFocus={() => setShowSuggestions(true)}
+                        autoFocus={autoFocus}
                         placeholder={value.length === 0 ? placeholder : ''}
                         className="flex-1 min-w-[80px] text-sm outline-none bg-transparent text-gray-900 placeholder:text-gray-400"
                     />

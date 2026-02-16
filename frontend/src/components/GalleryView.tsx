@@ -1106,219 +1106,261 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
     return (
         <div ref={scrollContainerRef} className="max-w-7xl mx-auto px-4 md:px-8 pb-12">
-            <div className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur-md -mx-4 px-4 py-4 md:-mx-8 md:px-8 mb-4 md:mb-6 border-b border-gray-200/50 shadow-sm transition-colors duration-200 flex flex-col gap-4" id="gallery-toolbar">
-                <div className="flex items-center justify-between">
+            {/* Modern Toolbar */}
+            <div 
+                id="gallery-toolbar"
+                className="sticky top-0 z-30 -mx-4 px-4 md:-mx-8 md:px-8 py-4 mb-6
+                           bg-white/80 backdrop-blur-xl border-b border-gray-200/60 shadow-sm
+                           transition-all duration-300 flex flex-col gap-4"
+            >
+                {/* Top Bar: Title & Main Actions */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    {/* Left: Navigation & Title */}
                     <div className="flex items-center gap-3 min-w-0">
                         {folderId && onBackToGallery && (
                             <button
                                 onClick={onBackToGallery}
                                 disabled={isBusy}
-                                className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:pointer-events-none flex-shrink-0"
+                                className="group p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-900 transition-all disabled:opacity-50"
                                 title="Back to gallery"
                             >
-                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <svg className="w-5 h-5 transition-transform group-hover:-translate-x-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                                 </svg>
                             </button>
                         )}
-                        <h2 className="text-2xl md:text-3xl font-bold text-gray-900 truncate">
+                        <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900 truncate">
                             {folderId && folderName ? folderName : 'Gallery'}
                         </h2>
                     </div>
-                    {/* Upload button - always visible on the right */}
-                    {!isPicker && (
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                                onClick={() => fileInputRef.current?.click()}
-                                disabled={uploadState?.active || isBusy}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-900 border border-gray-900 rounded-lg shadow-sm hover:bg-gray-800 disabled:opacity-50 transition-colors"
-                                title={folderId ? "Upload files to this folder" : "Upload media"}
-                            >
-                                <UploadIcon />
-                                <span className="hidden sm:inline">Upload</span>
-                            </button>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="image/*,video/*"
-                                multiple
-                                className="hidden"
-                                onChange={(e) => {
-                                    if (e.target.files && e.target.files.length > 0) {
-                                        handleUpload(e.target.files);
-                                        e.target.value = '';
-                                    }
-                                }}
-                            />
+
+                    {/* Right: Primary Controls */}
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                        {/* 1. Filter Segmented Control */}
+                        <div className={`flex p-1 bg-gray-100/80 rounded-xl border border-gray-200/50 ${isBusy ? 'opacity-50 pointer-events-none' : ''}`}>
+                            {FILTERS.map(({ value, label }) => (
+                                <button
+                                    key={value}
+                                    onClick={() => onFilterChange(value)}
+                                    disabled={isBusy}
+                                    className={`
+                                        px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-lg transition-all duration-200
+                                        ${filter === value
+                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-black/5'
+                                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'
+                                        }
+                                    `}
+                                >
+                                    {label}
+                                </button>
+                            ))}
                         </div>
-                    )}
+
+                        <div className="w-px h-6 bg-gray-200 mx-1 hidden sm:block"></div>
+
+                        {/* 2. Upload Button (Primary) */}
+                        {!isPicker && (
+                            <div className="relative">
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={uploadState?.active || isBusy}
+                                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gray-900 rounded-xl shadow-sm hover:bg-gray-800 hover:shadow-md active:scale-95 transition-all disabled:opacity-70 disabled:pointer-events-none disabled:active:scale-100"
+                                    title={folderId ? "Upload files to this folder" : "Upload media"}
+                                >
+                                    <UploadIcon />
+                                    <span className="hidden sm:inline">Upload</span>
+                                </button>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*,video/*"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        if (e.target.files && e.target.files.length > 0) {
+                                            handleUpload(e.target.files);
+                                            e.target.value = '';
+                                        }
+                                    }}
+                                />
+                            </div>
+                        )}
+                    </div>
                 </div>
-                {/* Controls row - wraps on mobile */}
-                <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                    <div className={`flex bg-white border border-gray-300 rounded-lg overflow-hidden shadow-sm ${isBusy ? 'opacity-50 pointer-events-none' : ''}`}>
-                        {FILTERS.map(({ value, label }) => (
+
+                {/* Bottom Bar: Filters & View Options */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    {/* Left: Filters & Search */}
+                    <div className="flex flex-wrap items-center gap-2">
+                         <TagFilter selectedTags={filterTags} onChange={setFilterTags} refreshKey={refreshKey} />
+                         
+                         {/* Favorites Toggle */}
+                        {!favoritesOnly && (
                             <button
-                                key={value}
-                                onClick={() => onFilterChange(value)}
+                                onClick={() => setViewFavorites(v => !v)}
                                 disabled={isBusy}
-                                className={`px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-colors ${
-                                    filter === value
-                                        ? 'bg-gray-900 text-white'
-                                        : 'text-gray-600 hover:bg-gray-50'
-                                }`}
+                                className={`
+                                    group flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all
+                                    ${viewFavorites
+                                        ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                    }
+                                `}
+                                title={viewFavorites ? "Show all items" : "Show favorites only"}
                             >
-                                {label}
+                                <HeartIcon solid={viewFavorites} />
+                                <span className="hidden sm:inline">Favorites</span>
                             </button>
-                        ))}
+                        )}
                     </div>
 
-                    {/* Favorites Toggle (only in gallery/folder view) */}
-                    {!favoritesOnly && (
+                    {/* Right: View Options */}
+                    <div className="flex flex-wrap items-center gap-2">
+                        {/* Sort */}
                         <button
-                            onClick={() => setViewFavorites(v => !v)}
+                            onClick={() => setSortOrder(s => {
+                                const next = s === 'desc' ? 'asc' : 'desc';
+                                localStorage.setItem('gallerySortOrder', next);
+                                return next;
+                            })}
                             disabled={isBusy}
-                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:pointer-events-none ${
-                                viewFavorites
-                                    ? 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
-                                    : 'text-gray-600 bg-white border border-gray-300 hover:bg-gray-50'
-                            }`}
-                            title={viewFavorites ? "Show all items" : "Show favorites only"}
+                            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all active:scale-95"
+                            title={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
                         >
-                            <HeartIcon solid={viewFavorites} />
-                            <span className="hidden sm:inline">Favorites</span>
+                             <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                {sortOrder === 'desc' ? (
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
+                                ) : (
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0l-3.75-3.75M17.25 21L21 17.25" />
+                                )}
+                            </svg>
+                            <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
                         </button>
-                    )}
 
-                    <button
-                        onClick={() => setSortOrder(s => {
-                            const next = s === 'desc' ? 'asc' : 'desc';
-                            localStorage.setItem('gallerySortOrder', next);
-                            return next;
-                        })}
-                        disabled={isBusy}
-                        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                        title={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
-                    >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                            {sortOrder === 'desc' ? (
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
-                            ) : (
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0l-3.75-3.75M17.25 21L21 17.25" />
-                            )}
-                        </svg>
-                        <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
-                    </button>
+                        <div className="w-px h-5 bg-gray-200 mx-1 hidden sm:block"></div>
 
-                    {/* Auto-tag button */}
-                    {!isPicker && (
-                      <button
-                        onClick={isAutoTagging ? () => setShowCancelAutoTagConfirm(true) : () => setShowStartAutoTagConfirm(true)}
-                        disabled={isBusy && !isAutoTagging}
-                        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors border disabled:opacity-50 disabled:pointer-events-none ${
-                          isAutoTagging
-                            ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                            : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
-                        }`}
-                        title={isAutoTagging ? "Cancel auto-tagging" : "Auto-tag current view using learned models"}
-                      >
-                          {isAutoTagging ? (
-                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                          ) : (
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                            </svg>
-                          )}
-                          <span className="hidden sm:inline">{isAutoTagging ? 'Cancel' : 'Auto Tag'}</span>
-                      </button>
-                    )}
-
-                    <TagFilter selectedTags={filterTags} onChange={setFilterTags} refreshKey={refreshKey} />
-                    <button
-                        onClick={() => setIsGrouped(g => !g)}
-                        disabled={isBusy}
-                        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:pointer-events-none ${
-                            isGrouped
-                                ? 'bg-purple-600 text-white border border-purple-600 hover:bg-purple-700'
-                                : 'text-gray-600 bg-white border border-gray-300 hover:bg-gray-50'
-                        }`}
-                        title="Group similar images"
-                    >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                        </svg>
-                        <span className="hidden sm:inline">Group</span>
-                    </button>
-
-                    {/* Similarity Slider (Grouped View) */}
-                    {isGrouped && (
-                        <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-1.5 shadow-sm h-[38px]">
-                            <span className="text-xs font-medium text-gray-500 whitespace-nowrap">
-                                Sim: <span className="text-purple-600">{groupSimilarity}%</span>
-                            </span>
-                            <input
-                                type="range"
-                                min="50"
-                                max="99"
-                                value={groupSimilarity}
-                                onChange={(e) => setGroupSimilarity(Number(e.target.value))}
-                                onPointerUp={commitGroupSimilarity}
-                                onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') commitGroupSimilarity(); }}
+                        {/* Grouping */}
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setIsGrouped(g => !g)}
                                 disabled={isBusy}
-                                className="w-20 sm:w-24 accent-purple-600 cursor-pointer h-1.5 bg-gray-200 rounded-lg appearance-none disabled:opacity-50 disabled:pointer-events-none"
-                                title="Adjust similarity grouping threshold"
-                            />
+                                className={`
+                                    flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all active:scale-95
+                                    ${isGrouped
+                                        ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                    }
+                                `}
+                                title="Group similar images"
+                            >
+                                <svg className={`w-4 h-4 ${isGrouped ? 'text-purple-600' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                                </svg>
+                                <span className="hidden sm:inline">Group</span>
+                            </button>
+
+                            {isGrouped && (
+                                <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-1.5 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200">
+                                    <span className="text-xs font-semibold text-gray-500 whitespace-nowrap">
+                                        Similarity: <span className="text-purple-600">{groupSimilarity}%</span>
+                                    </span>
+                                    <input
+                                        type="range"
+                                        min="50"
+                                        max="99"
+                                        value={groupSimilarity}
+                                        onChange={(e) => setGroupSimilarity(Number(e.target.value))}
+                                        onPointerUp={commitGroupSimilarity}
+                                        onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') commitGroupSimilarity(); }}
+                                        disabled={isBusy}
+                                        className="w-24 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-purple-600 hover:accent-purple-700"
+                                        title="Adjust similarity grouping threshold"
+                                    />
+                                </div>
+                            )}
                         </div>
-                    )}
 
-                    {/* Select mode toggle */}
-                    {media.length > 0 && !isGrouped && (
-                        <button
-                            onClick={() => selectionMode ? exitSelectionMode() : setSelectionMode(true)}
-                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors ${
-                                selectionMode
-                                    ? 'bg-blue-600 text-white border border-blue-600 hover:bg-blue-700'
-                                    : 'text-gray-600 bg-white border border-gray-300 hover:bg-gray-50'
-                            }`}
-                            title={selectionMode ? 'Exit selection' : 'Select items'}
-                        >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <span className="hidden sm:inline">{selectionMode ? 'Cancel' : 'Select'}</span>
-                        </button>
-                    )}
+                        {/* Auto Tag */}
+                        {!isPicker && (
+                            <button
+                                onClick={isAutoTagging ? () => setShowCancelAutoTagConfirm(true) : () => setShowStartAutoTagConfirm(true)}
+                                disabled={isBusy && !isAutoTagging}
+                                className={`
+                                    flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all active:scale-95
+                                    ${isAutoTagging
+                                        ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                    }
+                                `}
+                                title={isAutoTagging ? "Cancel auto-tagging" : "Auto-tag current view using learned models"}
+                            >
+                                {isAutoTagging ? (
+                                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                    </svg>
+                                ) : (
+                                    <svg className="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                                    </svg>
+                                )}
+                                <span className="hidden sm:inline">{isAutoTagging ? 'Cancel' : 'Auto Tag'}</span>
+                            </button>
+                        )}
 
-                    {/* Add from Library (Folder view only) */}
-                    {folderId && !isPicker && (
-                        <button
-                            onClick={() => setShowPicker(true)}
-                            disabled={isBusy}
-                            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                            title="Add existing media from library"
-                        >
-                            <PlusIcon />
-                            <span className="hidden sm:inline">Add from Library</span>
-                        </button>
-                    )}
+                        {/* Select Toggle */}
+                        {media.length > 0 && !isGrouped && (
+                            <button
+                                onClick={() => selectionMode ? exitSelectionMode() : setSelectionMode(true)}
+                                className={`
+                                    flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all active:scale-95
+                                    ${selectionMode
+                                        ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                    }
+                                `}
+                                title={selectionMode ? 'Exit selection' : 'Select items'}
+                            >
+                                <svg className={`w-4 h-4 ${selectionMode ? 'text-blue-600' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span className="hidden sm:inline">{selectionMode ? 'Done' : 'Select'}</span>
+                            </button>
+                        )}
+                        
+                        {/* Folder View Specific Actions */}
+                        {folderId && !isPicker && (
+                            <>
+                                <div className="w-px h-5 bg-gray-200 mx-1 hidden sm:block"></div>
+                                
+                                <button
+                                    onClick={() => setShowPicker(true)}
+                                    disabled={isBusy}
+                                    className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all active:scale-95"
+                                    title="Add existing media from library"
+                                >
+                                    <PlusIcon />
+                                    <span className="hidden sm:inline">Add</span>
+                                </button>
 
-                    {/* Download Folder (Folder view only) */}
-                    {folderId && !isPicker && media.length > 0 && (
-                        <button
-                            onClick={handleDownloadFolder}
-                            disabled={isDownloading || isBusy}
-                            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
-                            title="Download all items in folder"
-                        >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                            </svg>
-                            <span className="hidden sm:inline">Download All</span>
-                        </button>
-                    )}
+                                {media.length > 0 && (
+                                    <button
+                                        onClick={handleDownloadFolder}
+                                        disabled={isDownloading || isBusy}
+                                        className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all active:scale-95"
+                                        title="Download all items in folder"
+                                    >
+                                        <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                        </svg>
+                                        <span className="hidden xl:inline">Download All</span>
+                                    </button>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
+
 
             {/* Auto-tag progress bar */}
             {autoTagProgress && (

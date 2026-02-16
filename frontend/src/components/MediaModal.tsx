@@ -11,8 +11,8 @@ interface MediaModalProps {
     onPrev: (() => void) | null;
     onNext: (() => void) | null;
     onFindSimilar?: (id: string) => void;
-    onToggleFavorite: () => void;
-    onDelete: () => void;
+    onToggleFavorite?: () => void;
+    onDelete?: () => void;
     onTagsChanged?: () => void;
 }
 
@@ -391,7 +391,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                 cancelLabel="Cancel"
                 isDestructive={true}
                 onConfirm={() => {
-                    onDelete();
+                    onDelete?.();
                     setShowDeleteConfirm(false);
                 }}
                 onCancel={() => setShowDeleteConfirm(false)}

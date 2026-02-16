@@ -54,81 +54,100 @@ export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFil
     }, [isOpen]);
 
     return (
-        <div ref={wrapperRef} className="relative">
-            <div
+        <div ref={wrapperRef} className="relative z-20">
+            <button
                 onClick={() => setIsOpen(!isOpen)}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors border cursor-pointer ${
-                    selectedTags.length > 0 || isOpen
-                        ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
-                        : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
-                }`}
+                className={`
+                    flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all active:scale-95
+                    ${selectedTags.length > 0 || isOpen
+                        ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }
+                `}
                 title="Filter by tags"
             >
                 <TagIcon />
                 <span className="hidden sm:inline">Tags</span>
                 {selectedTags.length > 0 && (
-                    <span className="flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[10px] font-bold text-white bg-blue-600 rounded-full ml-0.5">
+                    <span className="flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold text-white bg-blue-600 rounded-full">
                         {selectedTags.length}
                     </span>
                 )}
-            </div>
+            </button>
 
             {isOpen && (
-                <div className="absolute right-0 z-50 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden flex flex-col max-h-[80vh] sm:max-h-96">
-                    <div className="p-2 border-b border-gray-100 bg-gray-50">
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
-                            placeholder="Search tags..."
-                            className="w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 text-gray-900"
-                            autoFocus
-                        />
+                <div className="absolute top-full mt-2 left-0 z-50 w-72 bg-white/95 backdrop-blur-xl border border-gray-200/60 rounded-xl shadow-2xl ring-1 ring-black/5 overflow-hidden flex flex-col max-h-[80vh] sm:max-h-96 animate-in fade-in zoom-in-95 duration-100 origin-top-left">
+                    <div className="p-3 border-b border-gray-100 bg-gray-50/50">
+                        <div className="relative">
+                            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                            </svg>
+                            <input
+                                type="text"
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                                placeholder="Search tags..."
+                                className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-gray-900 placeholder-gray-400 transition-all"
+                                autoFocus
+                            />
+                        </div>
                     </div>
                     
-                    <div className="overflow-y-auto flex-1 p-1">
+                    <div className="overflow-y-auto flex-1 p-1.5 scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
                         {filteredTags.length === 0 ? (
-                            <div className="px-3 py-4 text-center text-sm text-gray-500 italic">
-                                {allTags.length === 0 ? "No tags found" : "No matching tags"}
+                            <div className="px-4 py-8 text-center flex flex-col items-center justify-center text-gray-400">
+                                <TagIcon />
+                                <span className="mt-2 text-sm italic">{allTags.length === 0 ? "No tags found" : "No matching tags"}</span>
                             </div>
                         ) : (
-                            filteredTags.map(tagObj => {
-                                const tag = tagObj.name;
-                                const isSelected = selectedTags.includes(tag);
-                                return (
-                                    <button
-                                        key={tag}
-                                        onClick={() => toggleTag(tag)}
-                                        className={`flex items-center w-full px-3 py-2 text-sm text-left rounded-md transition-colors ${
-                                            isSelected 
-                                                ? 'bg-blue-50 text-blue-700 font-medium' 
-                                                : 'text-gray-700 hover:bg-gray-100'
-                                        }`}
-                                    >
-                                        <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center transition-colors ${
-                                            isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-400 bg-white'
-                                        }`}>
-                                            {isSelected && (
-                                                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                                </svg>
-                                            )}
-                                        </div>
-                                        <span className="truncate flex-1">{tag}</span>
-                                        <span className="text-xs text-gray-400 ml-2">({tagObj.count})</span>
-                                    </button>
-                                );
-                            })
+                            <div className="grid grid-cols-1 gap-0.5">
+                                {filteredTags.map(tagObj => {
+                                    const tag = tagObj.name;
+                                    const isSelected = selectedTags.includes(tag);
+                                    return (
+                                        <button
+                                            key={tag}
+                                            onClick={() => toggleTag(tag)}
+                                            className={`
+                                                group flex items-center w-full px-3 py-2 text-sm text-left rounded-lg transition-all
+                                                ${isSelected 
+                                                    ? 'bg-blue-50 text-blue-700' 
+                                                    : 'text-gray-700 hover:bg-gray-100'
+                                                }
+                                            `}
+                                        >
+                                            <div className={`
+                                                w-4 h-4 mr-3 border rounded flex items-center justify-center transition-all flex-shrink-0
+                                                ${isSelected 
+                                                    ? 'bg-blue-600 border-blue-600 shadow-sm' 
+                                                    : 'border-gray-300 bg-white group-hover:border-gray-400'
+                                                }
+                                            `}>
+                                                {isSelected && (
+                                                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                                    </svg>
+                                                )}
+                                            </div>
+                                            <span className="truncate flex-1 font-medium">{tag}</span>
+                                            <span className={`text-xs ml-2 px-1.5 py-0.5 rounded-full ${isSelected ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+                                                {tagObj.count}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         )}
                     </div>
 
                     {selectedTags.length > 0 && (
-                        <div className="p-2 border-t border-gray-100 bg-gray-50 flex justify-end">
+                        <div className="p-2 border-t border-gray-100 bg-gray-50/80 backdrop-blur-sm flex justify-between items-center">
+                            <span className="text-xs text-gray-500 ml-2">{selectedTags.length} selected</span>
                             <button
                                 onClick={() => onChange([])}
-                                className="text-xs font-medium text-red-600 hover:text-red-800 px-2 py-1"
+                                className="text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-md transition-colors"
                             >
-                                Clear filters
+                                Clear all
                             </button>
                         </div>
                     )}
@@ -136,4 +155,5 @@ export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFil
             )}
         </div>
     );
+
 }

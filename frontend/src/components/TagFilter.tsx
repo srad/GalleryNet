@@ -5,9 +5,10 @@ import { TagIcon } from './Icons';
 interface TagFilterProps {
     selectedTags: string[];
     onChange: (tags: string[]) => void;
+    refreshKey?: number;
 }
 
-export default function TagFilter({ selectedTags, onChange }: TagFilterProps) {
+export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFilterProps) {
     const [allTags, setAllTags] = useState<string[]>([]);
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -18,7 +19,7 @@ export default function TagFilter({ selectedTags, onChange }: TagFilterProps) {
             .then(res => res.ok ? res.json() : [])
             .then(setAllTags)
             .catch(() => {});
-    }, []);
+    }, [refreshKey]);
 
     const filteredTags = useMemo(() => {
         if (!searchTerm) return allTags;
@@ -49,9 +50,9 @@ export default function TagFilter({ selectedTags, onChange }: TagFilterProps) {
 
     return (
         <div ref={wrapperRef} className="relative">
-            <button
+            <div
                 onClick={() => setIsOpen(!isOpen)}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors border ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors border cursor-pointer ${
                     selectedTags.length > 0 || isOpen
                         ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
                         : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
@@ -65,7 +66,7 @@ export default function TagFilter({ selectedTags, onChange }: TagFilterProps) {
                         {selectedTags.length}
                     </span>
                 )}
-            </button>
+            </div>
 
             {isOpen && (
                 <div className="absolute right-0 z-50 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden flex flex-col max-h-[80vh] sm:max-h-96">

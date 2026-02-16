@@ -10,7 +10,8 @@ interface MediaModalProps {
     onPrev: (() => void) | null;
     onNext: (() => void) | null;
     onFindSimilar?: (id: string) => void;
-    onToggleFavorite?: () => void;
+    onToggleFavorite: () => void;
+    onTagsChanged?: () => void;
 }
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'wmv']);
@@ -18,21 +19,6 @@ const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'wm
 function isVideo(filename: string): boolean {
     const ext = filename.split('.').pop()?.toLowerCase() ?? '';
     return VIDEO_EXTENSIONS.has(ext);
-}
-
-function formatDate(iso: string): string {
-    try {
-        const d = new Date(iso);
-        return d.toLocaleDateString(undefined, {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    } catch {
-        return iso;
-    }
 }
 
 function formatBytes(bytes: number): string {
@@ -43,7 +29,14 @@ function formatBytes(bytes: number): string {
     return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimilar, onToggleFavorite }: MediaModalProps) {
+function formatDate(dateStr: string): string {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleString();
+}
+
+export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimilar, onToggleFavorite, onTagsChanged }: MediaModalProps) {
+
     const backdropRef = useRef<HTMLDivElement>(null);
     const video = isVideo(item.filename);
     const mediaUrl = `/uploads/${item.filename}`;
@@ -123,7 +116,8 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
     const handleTagsChange = useCallback(async (newTags: string[]) => {
         if (!displayItem.id) return;
         // Optimistic update locally
-        setDetail(prev => prev ? { ...prev, tags: newTags } : { ...item, tags: newTags });
+        const newTagDetails = newTags.map(name => ({ name, is_auto: false }));
+        setDetail(prev => prev ? { ...prev, tags: newTagDetails } : { ...item, tags: newTagDetails });
         
         try {
             await apiFetch(`/api/media/${displayItem.id}/tags`, {
@@ -131,10 +125,11 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tags: newTags }),
             });
+            onTagsChanged?.();
         } catch (e) {
             console.error('Failed to update tags', e);
         }
-    }, [displayItem.id, item]);
+    }, [displayItem.id, item, onTagsChanged]);
 
     return (
         <div

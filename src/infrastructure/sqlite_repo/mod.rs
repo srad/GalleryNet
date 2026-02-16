@@ -16,6 +16,7 @@ pub struct SqliteRepository {
 
 impl SqliteRepository {
     pub fn new(path: &str) -> Result<Self, DomainError> {
+        println!("Loading sqlite-vec extension...");
         // Load sqlite-vec extension
         unsafe {
             rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
@@ -24,8 +25,10 @@ impl SqliteRepository {
         }
 
         // Create first connection and initialize schema
+        println!("Opening initial connection to {}...", path);
         let conn = Self::open_conn(path)?;
 
+        println!("Ensuring media table exists...");
         conn.execute(
             "CREATE TABLE IF NOT EXISTS media (
                 id BLOB PRIMARY KEY,
@@ -42,16 +45,18 @@ impl SqliteRepository {
             )",
             [],
         )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        .map_err(|e| DomainError::Database(format!("Failed to create media table: {}", e)))?;
 
+        println!("Ensuring vec_media virtual table exists...");
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS vec_media USING vec0(
                 embedding float[1280] distance_metric=cosine
             )",
             [],
         )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        .map_err(|e| DomainError::Database(format!("Failed to create vec_media table: {}", e)))?;
 
+        println!("Ensuring folders table exists...");
         // Virtual folders
         conn.execute(
             "CREATE TABLE IF NOT EXISTS folders (
@@ -62,8 +67,9 @@ impl SqliteRepository {
             )",
             [],
         )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        .map_err(|e| DomainError::Database(format!("Failed to create folders table: {}", e)))?;
 
+        println!("Ensuring folder_media table exists...");
         conn.execute(
             "CREATE TABLE IF NOT EXISTS folder_media (
                 folder_id BLOB NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
@@ -73,8 +79,11 @@ impl SqliteRepository {
             )",
             [],
         )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        .map_err(|e| {
+            DomainError::Database(format!("Failed to create folder_media table: {}", e))
+        })?;
 
+        println!("Ensuring favorites table exists...");
         // Favorites
         conn.execute(
             "CREATE TABLE IF NOT EXISTS favorites (
@@ -83,8 +92,9 @@ impl SqliteRepository {
             )",
             [],
         )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        .map_err(|e| DomainError::Database(format!("Failed to create favorites table: {}", e)))?;
 
+        println!("Ensuring tags table exists...");
         // Tags
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tags (
@@ -93,29 +103,78 @@ impl SqliteRepository {
             )",
             [],
         )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        .map_err(|e| DomainError::Database(format!("Failed to create tags table: {}", e)))?;
 
+        println!("Ensuring media_tags table exists...");
         conn.execute(
             "CREATE TABLE IF NOT EXISTS media_tags (
                 media_id BLOB NOT NULL REFERENCES media(id) ON DELETE CASCADE,
                 tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                is_auto BOOLEAN NOT NULL DEFAULT 0,
+                confidence REAL,
                 PRIMARY KEY (media_id, tag_id)
             )",
             [],
         )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        .map_err(|e| DomainError::Database(format!("Failed to create media_tags table: {}", e)))?;
 
+        println!("Checking for migrations...");
+        // Migration for existing databases
+        let has_is_auto: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('media_tags') WHERE name='is_auto'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if has_is_auto == 0 {
+            println!("Adding is_auto column to media_tags...");
+            let _ = conn.execute(
+                "ALTER TABLE media_tags ADD COLUMN is_auto BOOLEAN NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+
+        let has_confidence: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('media_tags') WHERE name='confidence'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if has_confidence == 0 {
+            println!("Adding confidence column to media_tags...");
+            let _ = conn.execute("ALTER TABLE media_tags ADD COLUMN confidence REAL", []);
+        }
+
+        println!("Ensuring tag_models table exists...");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tag_models (
+                tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
+                weights BLOB NOT NULL,
+                bias REAL NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1
+            )",
+            [],
+        )
+        .map_err(|e| DomainError::Database(format!("Failed to create tag_models table: {}", e)))?;
+
+        println!("Ensuring idx_media_tags_tag_id index exists...");
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_media_tags_tag_id ON media_tags(tag_id)",
             [],
         )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        .map_err(|e| DomainError::Database(format!("Failed to create index: {}", e)))?;
 
+        println!("Opening connection pool...");
         let mut connections = vec![conn];
         for _ in 1..POOL_SIZE {
             connections.push(Self::open_conn(path)?);
         }
 
+        println!("Database initialization complete.");
         Ok(Self {
             pool: Mutex::new(connections),
             available: Condvar::new(),
@@ -123,15 +182,19 @@ impl SqliteRepository {
     }
 
     fn open_conn(path: &str) -> Result<Connection, DomainError> {
-        let conn = Connection::open(path).map_err(|e| DomainError::Database(e.to_string()))?;
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA busy_timeout=10000;
-             PRAGMA synchronous=NORMAL;
-             PRAGMA mmap_size=268435456;
-             PRAGMA cache_size=-64000;",
-        )
-        .map_err(|e| DomainError::Database(e.to_string()))?;
+        let conn = Connection::open(path)
+            .map_err(|e| DomainError::Database(format!("Failed to open connection: {}", e)))?;
+
+        // Use standard journaling for maximum compatibility with Docker bind mounts on Windows
+        // Use query_row for PRAGMAs that return values to avoid "Execute returned results" warnings
+        let _: String = conn
+            .query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))
+            .unwrap_or_else(|_| "DELETE".to_string());
+
+        let _: i64 = conn
+            .query_row("PRAGMA busy_timeout=10000", [], |r| r.get(0))
+            .unwrap_or(10000);
+
         Ok(conn)
     }
 
@@ -160,7 +223,7 @@ impl SqliteRepository {
 
 // ---- MediaRepository trait implementation (delegates to submodule _impl methods) ----
 
-use crate::domain::{Folder, MediaCounts, MediaItem, MediaRepository, MediaSummary};
+use crate::domain::{Folder, MediaCounts, MediaItem, MediaRepository, MediaSummary, TagDetail};
 
 impl MediaRepository for SqliteRepository {
     fn save_metadata_and_vector(
@@ -304,19 +367,75 @@ impl MediaRepository for SqliteRepository {
     ) -> Result<Vec<(MediaSummary, Vec<f32>)>, DomainError> {
         self.get_all_embeddings_impl(folder_id)
     }
+
+    // --- Tag Learning ---
+    fn save_tag_model(&self, tag_id: i64, weights: &[f64], bias: f64) -> Result<(), DomainError> {
+        self.save_tag_model_impl(tag_id, weights, bias)
+    }
+
+    fn get_tags_with_manual_counts(&self) -> Result<Vec<(i64, String, usize)>, DomainError> {
+        self.get_tags_with_manual_counts_impl()
+    }
+
+    fn get_tags_with_auto_counts(&self) -> Result<Vec<(i64, String, usize)>, DomainError> {
+        self.get_tags_with_auto_counts_impl()
+    }
+
+    fn count_auto_tags(&self, folder_id: Option<uuid::Uuid>) -> Result<usize, DomainError> {
+        self.count_auto_tags_impl(folder_id)
+    }
+
+    fn update_auto_tags(
+        &self,
+        tag_id: i64,
+        media_ids_with_scores: &[(uuid::Uuid, f64)],
+        scope_media_ids: Option<&[uuid::Uuid]>,
+    ) -> Result<(), DomainError> {
+        self.update_auto_tags_impl(tag_id, media_ids_with_scores, scope_media_ids)
+    }
+
+    fn get_random_embeddings(
+        &self,
+        limit: usize,
+        exclude_ids: &[uuid::Uuid],
+    ) -> Result<Vec<(uuid::Uuid, Vec<f32>)>, DomainError> {
+        self.get_random_embeddings_impl(limit, exclude_ids)
+    }
+
+    fn get_tag_id_by_name(&self, name: &str) -> Result<Option<i64>, DomainError> {
+        self.get_tag_id_by_name_impl(name)
+    }
+
+    fn get_manual_positives(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError> {
+        self.get_manual_positives_impl(tag_id)
+    }
+
+    fn get_all_ids_with_tag(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError> {
+        self.get_all_ids_with_tag_impl(tag_id)
+    }
 }
 
 // ---- Tag helpers shared across submodules ----
 
 /// Load tags for a single media item (by UUID bytes).
-pub(crate) fn load_tags_for_media(conn: &Connection, media_id: &[u8]) -> Vec<String> {
+pub(crate) fn load_tags_for_media(conn: &Connection, media_id: &[u8]) -> Vec<TagDetail> {
     let mut stmt = match conn.prepare(
-        "SELECT t.name FROM tags t JOIN media_tags mt ON mt.tag_id = t.id WHERE mt.media_id = ?1 ORDER BY t.name",
+        "SELECT t.name, mt.is_auto, mt.confidence 
+         FROM tags t 
+         JOIN media_tags mt ON mt.tag_id = t.id 
+         WHERE mt.media_id = ?1 
+         ORDER BY t.name",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
     };
-    let rows = match stmt.query_map(params![media_id], |row| row.get::<_, String>(0)) {
+    let rows = match stmt.query_map(params![media_id], |row| {
+        Ok(TagDetail {
+            name: row.get(0)?,
+            is_auto: row.get(1)?,
+            confidence: row.get(2)?,
+        })
+    }) {
         Ok(r) => r,
         Err(_) => return vec![],
     };
@@ -327,8 +446,9 @@ pub(crate) fn load_tags_for_media(conn: &Connection, media_id: &[u8]) -> Vec<Str
 pub(crate) fn load_tags_bulk(
     conn: &Connection,
     media_ids: &[Vec<u8>],
-) -> std::collections::HashMap<Vec<u8>, Vec<String>> {
-    let mut map: std::collections::HashMap<Vec<u8>, Vec<String>> = std::collections::HashMap::new();
+) -> std::collections::HashMap<Vec<u8>, Vec<TagDetail>> {
+    let mut map: std::collections::HashMap<Vec<u8>, Vec<TagDetail>> =
+        std::collections::HashMap::new();
     if media_ids.is_empty() {
         return map;
     }
@@ -339,4 +459,14 @@ pub(crate) fn load_tags_bulk(
         }
     }
     map
+}
+
+pub(crate) fn normalize_vector(vector: &mut [f32]) {
+    let norm: f32 = vector.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        let inv = 1.0 / norm;
+        for v in vector.iter_mut() {
+            *v *= inv;
+        }
+    }
 }

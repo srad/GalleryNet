@@ -14,7 +14,7 @@ use tracing::error;
 use uuid::Uuid;
 use tokio::io::AsyncWriteExt;
 
-use crate::application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase};
+use crate::application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, TagLearningUseCase};
 use crate::domain::{DomainError, MediaItem, MediaRepository};
 use crate::presentation::auth::AuthConfig;
 
@@ -26,6 +26,7 @@ pub struct AppState {
     pub list_use_case: Arc<ListMediaUseCase>,
     pub delete_use_case: Arc<DeleteMediaUseCase>,
     pub group_use_case: Arc<GroupMediaUseCase>,
+    pub tag_learning_use_case: Arc<TagLearningUseCase>,
     pub repo: Arc<dyn MediaRepository>,
     pub upload_dir: PathBuf,
     pub auth_config: Option<AuthConfig>,
@@ -79,14 +80,15 @@ impl IntoResponse for DomainError {
         }
 
         let (status, message) = match self {
-            DomainError::DuplicateMedia => (StatusCode::CONFLICT, "Media already exists"),
-            DomainError::NotFound => (StatusCode::NOT_FOUND, "Media not found"),
-            DomainError::Database(_e) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error"),
-            DomainError::Ai(_e) => (StatusCode::INTERNAL_SERVER_ERROR, "AI processing error"),
-            DomainError::Hashing(_e) => (StatusCode::INTERNAL_SERVER_ERROR, "Hashing error"),
-            DomainError::Io(_e) => (StatusCode::INTERNAL_SERVER_ERROR, "IO error"),
-            DomainError::ModelLoad(_e) => (StatusCode::INTERNAL_SERVER_ERROR, "Model loading error"),
+            DomainError::DuplicateMedia => (StatusCode::CONFLICT, "Media already exists".to_string()),
+            DomainError::NotFound => (StatusCode::NOT_FOUND, "Media not found".to_string()),
+            DomainError::Database(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
+            DomainError::Ai(e) => (StatusCode::BAD_REQUEST, e), // AI errors are usually client-data-related (not enough examples)
+            DomainError::Hashing(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
+            DomainError::Io(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
+            DomainError::ModelLoad(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
         };
+
         
         let body = Json(json!({ "error": message }));
         (status, body).into_response()
@@ -112,10 +114,16 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media/{id}", get(get_media_handler).delete(delete_handler))
         .route("/media/{id}/favorite", post(toggle_favorite_handler))
         .route("/media/{id}/tags", put(update_tags_handler))
-        .route("/media/batch-tags", put(batch_update_tags_handler))
+        .        route("/media/batch-tags", put(batch_update_tags_handler))
         .route("/media/{id}/similar", get(search_by_id_handler))
         .route("/tags", get(list_tags_handler))
+        .route("/tags/models", get(list_trained_tags_handler))
+        .route("/tags/count", get(get_auto_tags_count_handler))
+        .route("/tags/learn", post(learn_tag_handler))
+        .route("/tags/auto-tag", post(auto_tag_handler))
+        .route("/tags/{id}/apply", post(apply_tag_handler))
         .route("/stats", get(stats_handler))
+
         .route("/folders", get(list_folders_handler).post(create_folder_handler))
         .route("/folders/reorder", put(reorder_folders_handler))
         .route("/folders/{id}", put(rename_folder_handler).delete(delete_folder_handler))
@@ -489,6 +497,71 @@ async fn list_tags_handler(
 ) -> Result<impl IntoResponse, DomainError> {
     let tags = state.repo.get_all_tags()?;
     Ok(Json(tags))
+}
+
+async fn list_trained_tags_handler(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, DomainError> {
+    let tags = state.tag_learning_use_case.get_trainable_tags()?;
+    Ok(Json(tags))
+}
+
+#[derive(Deserialize)]
+pub struct CountAutoTagsQuery {
+    pub folder_id: Option<Uuid>,
+}
+
+async fn get_auto_tags_count_handler(
+    State(state): State<AppState>,
+    Query(query): Query<CountAutoTagsQuery>,
+) -> Result<impl IntoResponse, DomainError> {
+    let count = state.repo.count_auto_tags(query.folder_id)?;
+    Ok(Json(json!({ "count": count })))
+}
+
+#[derive(Deserialize)]
+pub struct LearnTagRequest {
+    pub tag_name: String,
+    pub positive_ids: Vec<Uuid>,
+}
+
+async fn learn_tag_handler(
+    State(state): State<AppState>,
+    Json(body): Json<LearnTagRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    let count = state.tag_learning_use_case.learn_tag(&body.tag_name, body.positive_ids)?;
+    Ok(Json(json!({ "auto_tagged_count": count })))
+}
+
+#[derive(Deserialize)]
+pub struct AutoTagRequest {
+    pub folder_id: Option<Uuid>,
+}
+
+async fn auto_tag_handler(
+    State(state): State<AppState>,
+    Json(body): Json<AutoTagRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    let result = state.tag_learning_use_case.run_auto_tagging(body.folder_id)?;
+    Ok(Json(json!({ 
+        "before": result.before,
+        "after": result.after,
+        "models_processed": result.models_processed
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct ApplyTagRequest {
+    pub folder_id: Option<Uuid>,
+}
+
+async fn apply_tag_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<ApplyTagRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    let count = state.tag_learning_use_case.apply_tag_model(id, body.folder_id)?;
+    Ok(Json(json!({ "auto_tagged_count": count })))
 }
 
 #[derive(Deserialize)]

@@ -16,7 +16,8 @@ src/
 │   ├── search.rs    # SearchSimilarUseCase — extract query features, find similar via DB
 │   ├── list.rs      # ListMediaUseCase — paginated media listing with optional media_type filter and sort
 │   ├── delete.rs    # DeleteMediaUseCase — single and batch delete (DB + files)
-│   └── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison
+│   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison
+│   └── tag_learning.rs # TagLearningUseCase — SVM-based iterative learning and auto-tagging
 ├── infrastructure/  # Trait implementations (adapters)
 │   ├── sqlite_repo/       # SQLite + sqlite-vec (connection pool, split into submodules)
 │   │   ├── mod.rs         # Pool struct, schema init, trait impl delegation, tag helpers
@@ -189,6 +190,10 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `POST /api/upload` — Multipart file upload (single or multiple files). Single file returns `MediaItem` JSON. Multiple files returns array of `{media, error, filename}` results. Streams to temp file to avoid memory buffering. HTTP 409 for duplicates.
 - `POST /api/search` — Multipart with `file` (image) and `similarity` (0-100). Returns array of `MediaItem`.
 - `POST /api/media/group` — Group media by similarity. JSON body `{"folder_id": "...", "similarity": 80}`. Returns array of `MediaGroup` (groups of items).
+- `GET /api/tags` — List all unique tags.
+- `GET /api/tags/count?folder_id=...` — Count auto-tags in current view.
+- `POST /api/tags/learn` — Learn from manual tags. JSON body `{"tag_name":"...", "positive_ids": [...]}`.
+- `POST /api/tags/{id}/apply` — Apply learned tag model. Body `{"folder_id": "..."}`.
 - `GET /api/media?page=1&limit=20&media_type=image&sort=desc&tags=a,b` — Paginated media list. Optional `media_type` filter (`image` or `video`). Optional `sort` param (`asc` or `desc`, default `desc`). Optional `favorite=true`. Optional `tags` (comma-separated, AND filter). Sorted by `original_date`. Returns array of `MediaSummary`.
 - `GET /api/media/{id}` — Get full `MediaItem` by UUID, including `exif_json`. Returns 404 if not found.
 - `POST /api/media/{id}/favorite` — Toggle favorite status. JSON body `{"favorite": true/false}`. Returns 200.

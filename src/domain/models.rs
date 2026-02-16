@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagDetail {
+    pub name: String,
+    pub is_auto: bool,
+    pub confidence: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaItem {
     pub id: Uuid,
     pub filename: String,
@@ -18,7 +25,7 @@ pub struct MediaItem {
     #[serde(default)]
     pub is_favorite: bool,
     #[serde(default)]
-    pub tags: Vec<String>,
+    pub tags: Vec<TagDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,10 +36,11 @@ pub struct MediaSummary {
     pub media_type: String,
     pub uploaded_at: DateTime<Utc>,
     pub original_date: DateTime<Utc>,
+    pub size_bytes: i64,
     #[serde(default)]
     pub is_favorite: bool,
     #[serde(default)]
-    pub tags: Vec<String>,
+    pub tags: Vec<TagDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

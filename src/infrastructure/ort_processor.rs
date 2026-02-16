@@ -1,6 +1,6 @@
 use crate::domain::{AiProcessor, DomainError};
 use image::{imageops::FilterType, GenericImageView};
-use ndarray::Array4;
+use ndarray017::Array4;
 use ort::{inputs, session::Session, value::TensorRef};
 use std::sync::{Condvar, Mutex};
 

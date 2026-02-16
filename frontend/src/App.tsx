@@ -140,9 +140,9 @@ export default function App() {
     }
 
     return (
-        <div className="flex h-screen w-full bg-gray-50 font-sans text-gray-800 overflow-hidden">
+        <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-800 overflow-hidden">
             {/* Mobile header bar */}
-            <div className="fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 md:hidden">
+            <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 md:hidden flex-shrink-0">
                 <button
                     onClick={() => setSidebarOpen(true)}
                     className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
@@ -157,77 +157,80 @@ export default function App() {
                 </h1>
             </div>
 
-            {/* Sidebar backdrop (mobile only) */}
-            {sidebarOpen && (
-                <div
-                    className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
-                    onClick={() => setSidebarOpen(false)}
-                />
-            )}
-
-            <Sidebar
-                activeTab={activeTab}
-                onTabChange={handleTabChange}
-                refreshKey={refreshKey}
-                onLogout={authRequired ? handleLogout : undefined}
-                folders={folders}
-                activeFolder={activeFolder}
-                onSelectFolder={handleSelectFolderWrapped}
-                onFoldersChanged={fetchFolders}
-                disabled={isBusy}
-                mobileOpen={sidebarOpen}
-                onMobileClose={() => setSidebarOpen(false)}
-            />
-
-            <main className="flex-1 h-full overflow-y-auto p-4 pt-16 md:p-8 md:pt-8">
-                <div className={activeTab === 'gallery' ? '' : 'hidden'}>
-                    <GalleryView
-                        filter={mediaFilter}
-                        onFilterChange={handleFilterChange}
-                        refreshKey={refreshKey}
-                        folders={folders}
-                        onFoldersChanged={fetchFolders}
-                        onUploadComplete={handleUploadComplete}
-                        onBusyChange={setIsBusy}
-                        onFindSimilar={handleFindSimilar}
-                    />
-                </div>
-
-                <div className={activeTab === 'favorites' ? '' : 'hidden'}>
-                    <GalleryView
-                        filter={mediaFilter}
-                        onFilterChange={handleFilterChange}
-                        refreshKey={refreshKey}
-                        folders={folders}
-                        onFoldersChanged={fetchFolders}
-                        onUploadComplete={handleUploadComplete}
-                        onBusyChange={setIsBusy}
-                        onFindSimilar={handleFindSimilar}
-                        favoritesOnly={true}
-                    />
-                </div>
-
-                <div className={activeTab === 'search' ? '' : 'hidden'}>
-                    <SearchView initialMediaId={activeSearchMediaId} />
-                </div>
-
-                {activeTab === 'folder' && activeFolder && (
-                    <GalleryView
-                        key={`folder-${activeFolder.id}`}
-                        filter={mediaFilter}
-                        onFilterChange={handleFilterChange}
-                        refreshKey={refreshKey}
-                        folderId={activeFolder.id}
-                        folderName={activeFolder.name}
-                        onBackToGallery={handleBackToGallery}
-                        folders={folders}
-                        onFoldersChanged={fetchFolders}
-                        onUploadComplete={handleUploadComplete}
-                        onBusyChange={setIsBusy}
-                        onFindSimilar={handleFindSimilar}
+            {/* Main content area */}
+            <div className="flex flex-1 overflow-hidden">
+                {/* Sidebar backdrop (mobile only) */}
+                {sidebarOpen && (
+                    <div
+                        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+                        onClick={() => setSidebarOpen(false)}
                     />
                 )}
-            </main>
+
+                <Sidebar
+                    activeTab={activeTab}
+                    onTabChange={handleTabChange}
+                    refreshKey={refreshKey}
+                    onLogout={authRequired ? handleLogout : undefined}
+                    folders={folders}
+                    activeFolder={activeFolder}
+                    onSelectFolder={handleSelectFolderWrapped}
+                    onFoldersChanged={fetchFolders}
+                    disabled={isBusy}
+                    mobileOpen={sidebarOpen}
+                    onMobileClose={() => setSidebarOpen(false)}
+                />
+
+                <main className="flex-1 h-full overflow-y-auto">
+                    <div className={activeTab === 'gallery' ? '' : 'hidden'}>
+                        <GalleryView
+                            filter={mediaFilter}
+                            onFilterChange={handleFilterChange}
+                            refreshKey={refreshKey}
+                            folders={folders}
+                            onFoldersChanged={fetchFolders}
+                            onUploadComplete={handleUploadComplete}
+                            onBusyChange={setIsBusy}
+                            onFindSimilar={handleFindSimilar}
+                        />
+                    </div>
+
+                    <div className={activeTab === 'favorites' ? '' : 'hidden'}>
+                        <GalleryView
+                            filter={mediaFilter}
+                            onFilterChange={handleFilterChange}
+                            refreshKey={refreshKey}
+                            folders={folders}
+                            onFoldersChanged={fetchFolders}
+                            onUploadComplete={handleUploadComplete}
+                            onBusyChange={setIsBusy}
+                            onFindSimilar={handleFindSimilar}
+                            favoritesOnly={true}
+                        />
+                    </div>
+
+                    <div className={activeTab === 'search' ? 'p-4 md:p-8' : 'hidden'}>
+                        <SearchView initialMediaId={activeSearchMediaId} />
+                    </div>
+
+                    {activeTab === 'folder' && activeFolder && (
+                        <GalleryView
+                            key={`folder-${activeFolder.id}`}
+                            filter={mediaFilter}
+                            onFilterChange={handleFilterChange}
+                            refreshKey={refreshKey}
+                            folderId={activeFolder.id}
+                            folderName={activeFolder.name}
+                            onBackToGallery={handleBackToGallery}
+                            folders={folders}
+                            onFoldersChanged={fetchFolders}
+                            onUploadComplete={handleUploadComplete}
+                            onBusyChange={setIsBusy}
+                            onFindSimilar={handleFindSimilar}
+                        />
+                    )}
+                </main>
+            </div>
         </div>
     );
 }

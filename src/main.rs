@@ -9,7 +9,7 @@ use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use infrastructure::{SqliteRepository, OrtProcessor, PhashGenerator};
-use application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase};
+use application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, TagLearningUseCase};
 use presentation::{AppState, AuthConfig, app_router};
 
 // UPDATED: Added ServeFile
@@ -100,6 +100,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repo.clone(),
     ));
 
+    let tag_learning_use_case = Arc::new(TagLearningUseCase::new(
+        repo.clone(),
+    ));
+
     // Initialize App State
     let state = AppState {
         upload_use_case,
@@ -107,6 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         list_use_case,
         delete_use_case,
         group_use_case,
+        tag_learning_use_case,
         repo: repo.clone(),
         upload_dir: upload_dir.clone(),
         auth_config: auth_config.clone(),

@@ -27,7 +27,7 @@ function LibraryPicker({ onPick, onCancel, refreshKey, folders, onFoldersChanged
                     </svg>
                 </button>
             </div>
-            <main className="flex-1 overflow-y-auto p-4 sm:p-8">
+            <main className="flex-1 overflow-y-auto">
                 <GalleryView
                     filter={filter}
                     onFilterChange={setFilter}
@@ -98,31 +98,15 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
     const [showBatchTagModal, setShowBatchTagModal] = useState(false);
     const [batchTags, setBatchTags] = useState<string[]>([]);
+    const [isLearning, setIsLearning] = useState(false);
+    const [isBatchTagging, setIsBatchTagging] = useState(false);
+    const [isAutoTagging, setIsAutoTagging] = useState(false);
+    const [autoTagProgress, setAutoTagProgress] = useState<{ current: number; total: number; label: string } | null>(null);
 
     // --- Grouping state ---
     const [isGrouped, setIsGrouped] = useState(false);
     const [groups, setGroups] = useState<MediaGroup[]>([]);
     const [groupSimilarity, setGroupSimilarity] = useState(70);
-
-    // True while the server is computing similarity groups
-    const isGroupComputing = isGrouped && isLoading;
-
-    // Notify parent when the busy state changes (for locking navigation)
-    const prevBusyRef = useRef(false);
-    useEffect(() => {
-        if (prevBusyRef.current !== isGroupComputing) {
-            prevBusyRef.current = isGroupComputing;
-            onBusyChange?.(isGroupComputing);
-        }
-    }, [isGroupComputing, onBusyChange]);
-
-    // Prevent accidental page close while computing
-    useEffect(() => {
-        if (!isGroupComputing) return;
-        const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
-        window.addEventListener('beforeunload', handler);
-        return () => window.removeEventListener('beforeunload', handler);
-    }, [isGroupComputing]);
 
     // --- Selection state ---
     const [selectionMode, setSelectionMode] = useState(false);
@@ -138,6 +122,26 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     // --- Add-to-folder picker state ---
     const [showFolderPicker, setShowFolderPicker] = useState(false);
     const [isAddingToFolder, setIsAddingToFolder] = useState(false);
+
+    // True while the server is computing similarity groups or processing batch actions
+    const isBusy = (isGrouped && isLoading) || isLearning || isBatchTagging || isDeleting || isAddingToFolder || isAutoTagging;
+
+    // Notify parent when the busy state changes (for locking navigation)
+    const prevBusyRef = useRef(false);
+    useEffect(() => {
+        if (prevBusyRef.current !== isBusy) {
+            prevBusyRef.current = isBusy;
+            onBusyChange?.(isBusy);
+        }
+    }, [isBusy, onBusyChange]);
+
+    // Prevent accidental page close while busy
+    useEffect(() => {
+        if (!isBusy) return;
+        const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+        window.addEventListener('beforeunload', handler);
+        return () => window.removeEventListener('beforeunload', handler);
+    }, [isBusy]);
 
     // --- Marquee (rubber-band) selection state ---
     const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -355,38 +359,67 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
     }, [buildUrl]);
 
-    // --- Silently merge new items when refreshKey changes (e.g. after upload) ---
+    // --- Silently merge new items and refresh metadata when refreshKey changes ---
     const mergeNewItems = useCallback(async (currentFilter: MediaFilter, currentSort: SortOrder) => {
         const id = ++fetchIdRef.current;
+        const currentCount = Math.max(PAGE_SIZE, mediaRef.current.length);
 
         try {
-            const url = buildUrl(1, currentFilter, currentSort);
+            // Fetch enough items to cover everything currently loaded, ensuring metadata sync
+            const params = new URLSearchParams({
+                page: '1',
+                limit: String(currentCount),
+                sort: currentSort,
+            });
+            if (currentFilter !== 'all') params.set('media_type', currentFilter);
+            if (viewFavorites) params.set('favorite', 'true');
+            if (filterTags.length > 0) params.set('tags', filterTags.join(','));
+            
+            const url = folderId 
+                ? `/api/folders/${folderId}/media?${params}`
+                : `/api/media?${params}`;
+
             const res = await apiFetch(url);
             if (!res.ok || id !== fetchIdRef.current) return;
 
-            const freshPage: MediaItem[] = await res.json();
+            const freshItems: MediaItem[] = await res.json();
             if (id !== fetchIdRef.current) return;
 
             setMedia(prev => {
-                // Build a set of existing filenames for dedup
-                const existing = new Set(prev.map(m => m.filename));
-                const newItems = freshPage.filter(m => !existing.has(m.filename));
+                // Map for quick lookup of fresh items by filename
+                const freshMap = new Map(freshItems.map(m => [m.filename, m]));
+                
+                // 1. Update metadata for existing items
+                const updated = prev.map(item => {
+                    const fresh = freshMap.get(item.filename);
+                    if (fresh) {
+                        return { 
+                            ...item, 
+                            tags: fresh.tags, 
+                            is_favorite: fresh.is_favorite,
+                            size_bytes: fresh.size_bytes,
+                            original_filename: fresh.original_filename
+                        };
+                    }
+                    return item;
+                });
 
-                if (newItems.length === 0) return prev;
+                // 2. Add truly new items (that appeared since last fetch, e.g. new uploads)
+                const existingFilenames = new Set(prev.map(m => m.filename));
+                const reallyNew = freshItems.filter(m => !existingFilenames.has(m.filename));
 
-                // Insert new items at the position dictated by sort order
-                // For desc (newest first), new uploads go to the front
-                // For asc (oldest first), new uploads go to the end
+                if (reallyNew.length === 0) return updated;
+
                 if (currentSort === 'desc') {
-                    return [...newItems, ...prev];
+                    return [...reallyNew, ...updated];
                 } else {
-                    return [...prev, ...newItems];
+                    return [...updated, ...reallyNew];
                 }
             });
         } catch (e) {
-            console.error('Failed to merge new media:', e);
+            console.error('Failed to merge/refresh media:', e);
         }
-    }, [buildUrl]);
+    }, [buildUrl, folderId, viewFavorites, filterTags]);
 
     // --- Full reset when filter, sortOrder, or grouping mode changes ---
     // Note: fetchGroups is intentionally called via ref to avoid re-triggering
@@ -448,22 +481,151 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             
         if (ids.length === 0) return;
 
+        setIsBatchTagging(true);
         try {
             await apiFetch('/api/media/batch-tags', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ids, tags: batchTags }),
             });
+            
+            // Optimistic update for immediate feedback
+            const newTagDetails = batchTags.map(name => ({ name, is_auto: false }));
+            setMedia(prev => prev.map(m => {
+                if (m.id && ids.includes(m.id)) {
+                    return { ...m, tags: newTagDetails };
+                }
+                return m;
+            }));
+
             setShowBatchTagModal(false);
             setBatchTags([]);
             exitSelectionMode();
-            // Refresh to show new tags (though tags aren't visible on grid yet, but filters use them)
-            fetchPage(1, filter, sortOrder, false); 
+            // Refresh via refreshKey ensures full sync (including is_auto from other processes)
+            onUploadComplete?.();
         } catch (e) {
             console.error('Batch tag error', e);
             alert('Failed to update tags');
+        } finally {
+            setIsBatchTagging(false);
         }
-    }, [batchTags, media, selected, exitSelectionMode, fetchPage, filter, sortOrder]);
+    }, [batchTags, media, selected, exitSelectionMode, fetchPage, filter, sortOrder, onUploadComplete]);
+
+    const handleLearnTag = useCallback(async () => {
+        if (batchTags.length === 0) {
+            alert("Please enter a tag name to learn.");
+            return;
+        }
+        if (batchTags.length > 1) {
+            alert("Please enter exactly one tag name for training.");
+            return;
+        }
+        
+        const ids = media
+            .filter(m => selected.has(m.filename) && m.id)
+            .map(m => m.id!);
+            
+        if (ids.length < 2) {
+            alert("Please select at least 2 items to learn from.");
+            return;
+        }
+
+        setIsLearning(true);
+        try {
+            const res = await apiFetch('/api/tags/learn', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tag_name: batchTags[0], positive_ids: ids }),
+            });
+            
+            if (res.ok) {
+                const data = await res.json();
+                alert(`Learning complete! Automatically tagged ${data.auto_tagged_count} other items.`);
+                setShowBatchTagModal(false);
+                setBatchTags([]);
+                exitSelectionMode();
+                onUploadComplete?.(); // Trigger refresh
+            } else {
+                const err = await res.json();
+                alert(`Learning failed: ${err.error || 'Unknown error'}`);
+            }
+        } catch (e) {
+            console.error('Learn tag error', e);
+            alert('Failed to start learning');
+        } finally {
+            setIsLearning(false);
+        }
+    }, [batchTags, media, selected, exitSelectionMode, onUploadComplete]);
+
+    const handleAutoTag = useCallback(async () => {
+        setIsAutoTagging(true);
+        setAutoTagProgress({ current: 0, total: 0, label: 'Initializing...' });
+        
+        try {
+            // 1. Get initial count
+            const countParams = new URLSearchParams();
+            if (folderId) countParams.set('folder_id', folderId);
+            const initialRes = await apiFetch(`/api/tags/count?${countParams}`);
+            const initialCount = initialRes.ok ? (await initialRes.json()).count : 0;
+
+            // 2. Get models to process
+            const modelsRes = await apiFetch('/api/tags/models');
+            if (!modelsRes.ok) throw new Error('Failed to fetch trained models');
+            const models: [number, string][] = await modelsRes.json();
+            
+            if (models.length === 0) {
+                alert('No auto-taggable tags found. Please manually tag at least 3 items with the same name first so the AI can learn what they look like!');
+                setIsAutoTagging(false);
+                setAutoTagProgress(null);
+                return;
+            }
+
+            setAutoTagProgress({ current: 0, total: models.length, label: `Processing ${models[0][1]}...` });
+
+            const errors: string[] = [];
+            
+            // 3. Process models one by one for progress feedback
+            for (let i = 0; i < models.length; i++) {
+                const [tagId, tagName] = models[i];
+                setAutoTagProgress({ current: i, total: models.length, label: `Applying "${tagName}"...` });
+                
+                try {
+                    const res = await apiFetch(`/api/tags/${tagId}/apply`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ folder_id: folderId || null }),
+                    });
+                    
+                    if (!res.ok) {
+                        const err = await res.json();
+                        errors.push(`${tagName}: ${err.error || 'Unknown error'}`);
+                    }
+                } catch (e) {
+                    errors.push(`${tagName}: Network error or crash`);
+                }
+            }
+
+            setAutoTagProgress({ current: models.length, total: models.length, label: 'Finalizing...' });
+            
+            // 4. Get final count
+            const finalRes = await apiFetch(`/api/tags/count?${countParams}`);
+            const finalCount = finalRes.ok ? (await finalRes.json()).count : 0;
+
+            let message = `Auto-tagging complete!\n\nTotal auto-tags before: ${initialCount}\nTotal auto-tags after: ${finalCount}\nChange: ${finalCount >= initialCount ? '+' : ''}${finalCount - initialCount}`;
+            
+            if (errors.length > 0) {
+                message += `\n\nSome tags encountered issues:\n• ${errors.join('\n• ')}`;
+            }
+            alert(message);
+            onUploadComplete?.(); // Refresh metadata
+        } catch (e) {
+            console.error('Auto-tag error', e);
+            alert('Auto-tagging failed');
+        } finally {
+            setIsAutoTagging(false);
+            setAutoTagProgress(null);
+        }
+    }, [folderId, onUploadComplete]);
 
     // --- Handle items picked from library (when acting as picker parent) ---
     const handlePickItems = useCallback(async (ids: string[]) => {
@@ -856,7 +1018,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         if (e.button !== 0) return;
         // Don't start marquee if clicking directly on a card's interactive element
         const target = e.target as HTMLElement;
-        if (!selectionMode && target.closest('button[data-filename]')) return;
+        if (!selectionMode && target.closest('[data-filename]')) return;
 
         // Enter selection mode automatically when starting a drag
         if (!selectionMode) setSelectionMode(true);
@@ -935,14 +1097,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     }, [getScrollParent, getCardsInRect]);
 
     return (
-        <div ref={scrollContainerRef} className="max-w-7xl mx-auto">
-            <div className="flex flex-col gap-3 mb-4 md:mb-6">
+        <div ref={scrollContainerRef} className="max-w-7xl mx-auto px-4 md:px-8 pb-12">
+            <div className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur-md -mx-4 px-4 py-4 md:-mx-8 md:px-8 mb-4 md:mb-6 border-b border-gray-200/50 shadow-sm transition-colors duration-200 flex flex-col gap-3" id="gallery-toolbar">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 min-w-0">
                         {folderId && onBackToGallery && (
                             <button
                                 onClick={onBackToGallery}
-                                disabled={isGroupComputing}
+                                disabled={isBusy}
                                 className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:pointer-events-none flex-shrink-0"
                                 title="Back to gallery"
                             >
@@ -960,7 +1122,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <div className="flex items-center gap-2 flex-shrink-0">
                             <button
                                 onClick={() => fileInputRef.current?.click()}
-                                disabled={uploadState?.active || isGroupComputing}
+                                disabled={uploadState?.active || isBusy}
                                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-900 border border-gray-900 rounded-lg shadow-sm hover:bg-gray-800 disabled:opacity-50 transition-colors"
                                 title={folderId ? "Upload files to this folder" : "Upload media"}
                             >
@@ -985,12 +1147,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 </div>
                 {/* Controls row - wraps on mobile */}
                 <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                    <div className={`flex bg-white border border-gray-300 rounded-lg overflow-hidden shadow-sm ${isGroupComputing ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <div className={`flex bg-white border border-gray-300 rounded-lg overflow-hidden shadow-sm ${isBusy ? 'opacity-50 pointer-events-none' : ''}`}>
                         {FILTERS.map(({ value, label }) => (
                             <button
                                 key={value}
                                 onClick={() => onFilterChange(value)}
-                                disabled={isGroupComputing}
+                                disabled={isBusy}
                                 className={`px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-colors ${
                                     filter === value
                                         ? 'bg-gray-900 text-white'
@@ -1006,7 +1168,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     {!favoritesOnly && (
                         <button
                             onClick={() => setViewFavorites(v => !v)}
-                            disabled={isGroupComputing}
+                            disabled={isBusy}
                             className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:pointer-events-none ${
                                 viewFavorites
                                     ? 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
@@ -1019,13 +1181,39 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         </button>
                     )}
 
+                    {/* Auto-tag button */}
+                    {!isPicker && (
+                        <button
+                            onClick={handleAutoTag}
+                            disabled={isBusy}
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors border disabled:opacity-50 disabled:pointer-events-none ${
+                                isAutoTagging
+                                    ? 'bg-indigo-50 text-indigo-600 border-indigo-200'
+                                    : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
+                            }`}
+                            title="Auto-tag current view using learned models"
+                        >
+                            {isAutoTagging ? (
+                                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                            ) : (
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                                </svg>
+                            )}
+                            <span className="hidden sm:inline">{isAutoTagging ? 'Tagging...' : 'Auto Tag'}</span>
+                        </button>
+                    )}
+
                     <button
                         onClick={() => setSortOrder(s => {
                             const next = s === 'desc' ? 'asc' : 'desc';
                             localStorage.setItem('gallerySortOrder', next);
                             return next;
                         })}
-                        disabled={isGroupComputing}
+                        disabled={isBusy}
                         className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
                         title={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
                     >
@@ -1039,10 +1227,10 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
                     </button>
 
-                    <TagFilter selectedTags={filterTags} onChange={setFilterTags} />
+                    <TagFilter selectedTags={filterTags} onChange={setFilterTags} refreshKey={refreshKey} />
                     <button
                         onClick={() => setIsGrouped(g => !g)}
-                        disabled={isGroupComputing}
+                        disabled={isBusy}
                         className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:pointer-events-none ${
                             isGrouped
                                 ? 'bg-purple-600 text-white border border-purple-600 hover:bg-purple-700'
@@ -1070,7 +1258,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                 onChange={(e) => setGroupSimilarity(Number(e.target.value))}
                                 onPointerUp={commitGroupSimilarity}
                                 onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') commitGroupSimilarity(); }}
-                                disabled={isGroupComputing}
+                                disabled={isBusy}
                                 className="w-20 sm:w-24 accent-purple-600 cursor-pointer h-1.5 bg-gray-200 rounded-lg appearance-none disabled:opacity-50 disabled:pointer-events-none"
                                 title="Adjust similarity grouping threshold"
                             />
@@ -1099,7 +1287,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     {folderId && !isPicker && (
                         <button
                             onClick={() => setShowPicker(true)}
-                            disabled={isGroupComputing}
+                            disabled={isBusy}
                             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
                             title="Add existing media from library"
                         >
@@ -1112,7 +1300,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     {folderId && !isPicker && media.length > 0 && (
                         <button
                             onClick={handleDownloadFolder}
-                            disabled={isDownloading || isGroupComputing}
+                            disabled={isDownloading || isBusy}
                             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
                             title="Download all items in folder"
                         >
@@ -1124,6 +1312,30 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     )}
                 </div>
             </div>
+
+            {/* Auto-tag progress bar */}
+            {autoTagProgress && (
+                <div className="mb-4 bg-indigo-50 border border-indigo-100 rounded-xl shadow-sm p-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                            <svg className="w-4 h-4 text-indigo-600 animate-spin" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            <span className="text-xs font-semibold text-indigo-900">{autoTagProgress.label}</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
+                            {autoTagProgress.total > 0 ? Math.round((autoTagProgress.current / autoTagProgress.total) * 100) : 0}%
+                        </span>
+                    </div>
+                    <div className="w-full bg-indigo-100/50 rounded-full h-1.5 overflow-hidden">
+                        <div
+                            className="h-1.5 bg-indigo-600 rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${autoTagProgress.total > 0 ? (autoTagProgress.current / autoTagProgress.total) * 100 : 0}%` }}
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* Upload progress bar */}
             {uploadState && (
@@ -1373,16 +1585,15 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
                             {/* Add to folder */}
                     <div className="relative" data-folder-picker>
-                        <button
-                            onClick={() => setShowFolderPicker(prev => !prev)}
-                            disabled={isAddingToFolder}
-                            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                        <div
+                            onClick={() => !isAddingToFolder && setShowFolderPicker(prev => !prev)}
+                            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 hover:bg-amber-700 transition-colors cursor-pointer ${isAddingToFolder ? 'opacity-50 pointer-events-none' : ''}`}
                         >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 10.5v6m3-3H9m4.06-7.19l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                             </svg>
                             <span className="hidden sm:inline">{isAddingToFolder ? 'Adding...' : 'Add to folder'}</span>
-                        </button>
+                        </div>
 
                         {/* Folder picker dropdown */}
                         {showFolderPicker && (
@@ -1529,6 +1740,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         onNext={nextItem ? () => setSelectedFilename(nextItem!.filename) : null}
                         onFindSimilar={onFindSimilar}
                         onToggleFavorite={() => handleToggleFavorite(item!)}
+                        onTagsChanged={onUploadComplete}
                     />
                 );
             })()}
@@ -1558,15 +1770,47 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                         <div className="px-4 py-3 bg-gray-50 flex justify-end gap-2">
                             <button
                                 onClick={() => setShowBatchTagModal(false)}
-                                className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                                disabled={isBatchTagging || isLearning}
+                                className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={handleBatchTag}
-                                className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                                disabled={isBatchTagging || isLearning}
+                                className="px-3 py-1.5 text-sm font-medium text-gray-900 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
                             >
-                                Apply Tags
+                                {isBatchTagging ? (
+                                    <>
+                                        <svg className="w-3.5 h-3.5 animate-spin text-gray-500" viewBox="0 0 24 24" fill="none">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                        </svg>
+                                        Saving...
+                                    </>
+                                ) : 'Apply Manually'}
+                            </button>
+                            <button
+                                onClick={handleLearnTag}
+                                disabled={isBatchTagging || isLearning}
+                                className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                            >
+                                {isLearning ? (
+                                    <>
+                                        <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                        </svg>
+                                        Learning...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+                                        </svg>
+                                        Smart Tag (Learn)
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>

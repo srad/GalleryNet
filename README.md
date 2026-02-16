@@ -47,6 +47,7 @@
 - **AI Visual Search** &mdash; Find similar images and videos using MobileNetV3 embeddings and cosine similarity via [sqlite-vec](https://github.com/asg017/sqlite-vec)
 - **Duplicate Detection** &mdash; Perceptual hashing automatically prevents uploading the same image or video twice
 - **Item Grouping** &mdash; Grouping of similar images and videos with gradual similarity slider
+- **AI-Powered Tagging** &mdash; Train your own image classifiers by tagging a few examples. SVM-based learning applies tags to similar items automatically.
 - **Favorites** &mdash; Mark items as favorites to quickly access your best shots in a dedicated view
 - **Video Support** &mdash; Full video upload with intelligent frame extraction via ffmpeg for thumbnails, hashing, and feature vectors
 - **Virtual Folders** &mdash; Organize media into folders without moving files. Many-to-many: one photo can live in multiple folders
@@ -73,7 +74,9 @@
 - Upload a reference image and find visually similar photos in your library
 - Adjustable similarity threshold (0&ndash;100%)
 - **Group by Similarity** &mdash; Automatically cluster your entire gallery into visually similar groups with a single click
+- **Active Learning Tags** &mdash; Tag 3+ items with the same name and click "Auto Tag" to train an AI model that automatically labels matching items in your gallery or folder.
 - Powered by MobileNetV3-Large with 1280-dimensional feature vectors
+
 - Vector similarity search using cosine distance in sqlite-vec
 
 ### Smart Upload
@@ -237,7 +240,12 @@ src/
 | `DELETE` | `/api/media/{id}` | Delete single media item |
 | `POST` | `/api/media/batch-delete` | Batch delete. Body: `["uuid1", ...]` |
 | `POST` | `/api/media/download` | Batch download as zip. Body: `["uuid1", ...]` |
+| `GET` | `/api/tags` | List all unique tags |
+| `GET` | `/api/tags/count` | Count auto-tags in current view |
+| `POST` | `/api/tags/learn` | Train model from examples. Body: `{"tag_name": "...", "positive_ids": [...]}` |
+| `POST` | `/api/tags/auto-tag` | Apply all trained models to current scope |
 | `GET` | `/api/folders` | List all folders with item counts |
+
 | `POST` | `/api/folders` | Create folder. Body: `{"name": "..."}` |
 | `DELETE` | `/api/folders/{id}` | Delete folder (keeps media files) |
 | `GET` | `/api/folders/{id}/media` | Paginated media in folder |

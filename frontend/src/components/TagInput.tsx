@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { apiFetch } from '../auth';
+import type { TagDetail } from '../types';
 
 interface TagInputProps {
-    value: string[];
+    value: (string | TagDetail)[];
     onChange: (tags: string[]) => void;
     placeholder?: string;
     readOnly?: boolean;
@@ -13,6 +14,13 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
     const [allTags, setAllTags] = useState<string[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const wrapperRef = useRef<HTMLDivElement>(null);
+
+    // Normalize value to TagDetail[]
+    const tagDetails = useMemo(() => value.map(t => 
+        typeof t === 'string' ? { name: t, is_auto: false } as TagDetail : t
+    ), [value]);
+
+    const tagNames = useMemo(() => tagDetails.map(t => t.name), [tagDetails]);
 
     useEffect(() => {
         apiFetch('/api/tags')
@@ -25,21 +33,21 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
         if (!inputValue.trim()) return [];
         const lower = inputValue.toLowerCase();
         return allTags.filter(t => 
-            t.toLowerCase().includes(lower) && !value.includes(t)
+            t.toLowerCase().includes(lower) && !tagNames.includes(t)
         );
-    }, [allTags, inputValue, value]);
+    }, [allTags, inputValue, tagNames]);
 
     const addTag = (tag: string) => {
         const trimmed = tag.trim();
-        if (trimmed && !value.includes(trimmed)) {
-            onChange([...value, trimmed]);
+        if (trimmed && !tagNames.includes(trimmed)) {
+            onChange([...tagNames, trimmed]);
         }
         setInputValue('');
         setShowSuggestions(false);
     };
 
-    const removeTag = (tag: string) => {
-        onChange(value.filter(t => t !== tag));
+    const removeTag = (tagName: string) => {
+        onChange(tagNames.filter(t => t !== tagName));
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -51,7 +59,9 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
                 addTag(inputValue);
             }
         } else if (e.key === 'Backspace' && !inputValue && value.length > 0) {
-            removeTag(value[value.length - 1]);
+            const lastTag = value[value.length - 1];
+            const name = typeof lastTag === 'string' ? lastTag : lastTag.name;
+            removeTag(name);
         } else if (e.key === 'Escape') {
             setShowSuggestions(false);
         }
@@ -71,13 +81,26 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
     return (
         <div ref={wrapperRef} className="relative w-full">
             <div className={`flex flex-wrap items-center gap-1.5 p-2 bg-white border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 ${readOnly ? 'bg-gray-50' : ''}`}>
-                {value.map(tag => (
-                    <span key={tag} className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-md border border-blue-100">
-                        {tag}
+                {tagDetails.map(tag => (
+                    <span 
+                        key={tag.name} 
+                        className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md border ${
+                            tag.is_auto 
+                            ? 'text-indigo-700 bg-indigo-50 border-indigo-100' 
+                            : 'text-blue-700 bg-blue-50 border-blue-100'
+                        }`}
+                        title={tag.is_auto ? `Automatically assigned (confidence: ${Math.round((tag.confidence || 0) * 100)}%)` : undefined}
+                    >
+                        {tag.is_auto && (
+                            <svg className="w-3 h-3 text-indigo-400" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                            </svg>
+                        )}
+                        {tag.name}
                         {!readOnly && (
                             <button
-                                onClick={() => removeTag(tag)}
-                                className="hover:text-blue-900 focus:outline-none"
+                                onClick={() => removeTag(tag.name)}
+                                className="hover:opacity-60 focus:outline-none ml-0.5"
                             >
                                 &times;
                             </button>

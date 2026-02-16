@@ -6,33 +6,6 @@ use uuid::Uuid;
 use super::{load_tags_bulk, load_tags_for_media, SqliteRepository};
 
 impl SqliteRepository {
-    // Media-specific trait implementations are below via the MediaRepository impl.
-    // This file only contains the media-related subset.
-}
-
-// We implement the media-related methods of MediaRepository here.
-// Rust allows splitting trait impls across files as long as each method appears exactly once.
-// Since we can't split a single `impl Trait for Type` across files, we use a single
-// impl block in media.rs that covers media + favorites + counts,
-// and delegate folders/tags/embeddings to extension methods called from a unified impl.
-//
-// Instead, we'll put ALL MediaRepository methods in ONE impl block in mod.rs,
-// but call helper methods defined in each submodule. However, that defeats the purpose
-// of splitting. The idiomatic Rust approach: use a single impl block but have the file
-// organization guide readability. Since Rust requires one impl block per trait per type,
-// we'll keep the full impl in this file and import helpers from siblings.
-//
-// Actually — we CAN have partial impl blocks for the *concrete type* (not trait).
-// So we'll define inherent methods on SqliteRepository in each subfile,
-// then have ONE trait impl block that delegates.
-//
-// Let's use the simplest approach: put the MediaRepository impl in mod.rs,
-// with each method body calling `self.method_impl(...)` defined as inherent methods
-// in the submodule files.
-
-// ---- Inherent helper methods for media operations ----
-
-impl SqliteRepository {
     pub(crate) fn save_metadata_and_vector_impl(
         &self,
         media: &MediaItem,
@@ -384,6 +357,7 @@ impl SqliteRepository {
                             .map_err(|_| DomainError::Database("Conversion error".to_string()))?;
                         floats.push(f32::from_ne_bytes(arr));
                     }
+                    super::normalize_vector(&mut floats);
                     Ok(Some(floats))
                 }
                 None => Ok(None),
@@ -447,7 +421,7 @@ impl SqliteRepository {
         self.with_conn(|conn| {
             let order = if sort_asc { "ASC" } else { "DESC" };
 
-            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite
+            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite, m.size_bytes
                          FROM media m
                          LEFT JOIN favorites f ON f.media_id = m.id".to_string();
 
@@ -503,6 +477,7 @@ impl SqliteRepository {
                     let timestamp_str: String = row.get(4)?;
                     let original_date_str: String = row.get(5)?;
                     let is_favorite: bool = row.get(6)?;
+                    let size_bytes: i64 = row.get(7)?;
 
                     let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -539,6 +514,7 @@ impl SqliteRepository {
                             media_type,
                             uploaded_at,
                             original_date,
+                            size_bytes,
                             is_favorite,
                             tags: vec![],
                         },

@@ -1,3 +1,9 @@
+export interface TagDetail {
+    name: string;
+    is_auto: boolean;
+    confidence?: number;
+}
+
 export interface MediaItem {
     id?: string;
     filename: string;
@@ -10,7 +16,7 @@ export interface MediaItem {
     height?: number;
     exif_json?: string;
     is_favorite?: boolean;
-    tags?: string[];
+    tags?: TagDetail[];
 }
 
 export type MediaFilter = 'all' | 'image' | 'video';

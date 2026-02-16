@@ -27,15 +27,22 @@ function isVideo(filename: string): boolean {
     return VIDEO_EXTENSIONS.has(ext);
 }
 
+function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    const val = bytes / Math.pow(1024, i);
+    return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
 export default function MediaCard({ item, onClick, selected, selectionMode, onSelect, onToggleFavorite }: MediaCardProps) {
     const video = isVideo(item.filename);
 
     return (
-        <button
-            type="button"
+        <div
             data-filename={item.filename}
             onClick={selectionMode ? onSelect : onClick}
-            className={`group relative block overflow-hidden rounded-lg bg-gray-100 border shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 w-full text-left ${
+            className={`group relative block overflow-hidden rounded-lg bg-gray-100 border shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 w-full text-left cursor-pointer ${
                 selected
                     ? 'border-blue-500 ring-2 ring-blue-500/40'
                     : 'border-gray-200/60'
@@ -111,10 +118,45 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
                 </div>
             )}
             {/* Overlay gradient on hover */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 flex flex-col justify-end p-2">
-                <p className="text-white text-[10px] font-medium truncate leading-tight">
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 flex flex-col justify-end p-2 gap-1.5">
+                <p className="text-white text-[10px] font-medium truncate leading-tight mb-0.5 px-0.5">
                     {item.original_filename || item.filename}
                 </p>
+                
+                {/* Badges container */}
+                <div className="flex flex-wrap gap-1 items-end">
+                    {/* Size badge */}
+                    {item.size_bytes != null && (
+                        <span className="px-1.5 py-0.5 rounded bg-black/40 backdrop-blur-sm border border-white/10 text-white text-[9px] font-bold uppercase tracking-wider">
+                            {formatBytes(item.size_bytes)}
+                        </span>
+                    )}
+                    
+                    {/* Tag badges */}
+                    {item.tags?.slice(0, 3).map(tag => (
+                        <span 
+                            key={tag.name} 
+                            className={`px-1.5 py-0.5 rounded backdrop-blur-sm border text-[9px] font-bold uppercase tracking-wider flex items-center gap-0.5 ${
+                                tag.is_auto 
+                                ? 'bg-indigo-500/40 border-indigo-400/30 text-indigo-100' 
+                                : 'bg-blue-500/40 border-blue-400/30 text-blue-100'
+                            }`}
+                        >
+                            {tag.is_auto && (
+                                <svg className="w-2 h-2" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                                </svg>
+                            )}
+                            {tag.name}
+                        </span>
+                    ))}
+                    {item.tags && item.tags.length > 3 && (
+                        <span className="px-1 py-0.5 rounded bg-black/40 backdrop-blur-sm border border-white/10 text-white text-[9px] font-bold">
+                            +{item.tags.length - 3}
+                        </span>
+                    )}
+                </div>
+
                 {/* Download button */}
                 <a
                     href={`/uploads/${item.filename}`}
@@ -128,6 +170,6 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
                     </svg>
                 </a>
             </div>
-        </button>
+        </div>
     );
 }

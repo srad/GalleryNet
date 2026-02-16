@@ -19,6 +19,12 @@ pub enum DomainError {
     ModelLoad(String),
 }
 
+impl From<rusqlite::Error> for DomainError {
+    fn from(err: rusqlite::Error) -> Self {
+        DomainError::Database(err.to_string())
+    }
+}
+
 pub trait MediaRepository: Send + Sync {
     fn save_metadata_and_vector(
         &self,
@@ -96,6 +102,26 @@ pub trait MediaRepository: Send + Sync {
         &self,
         folder_id: Option<uuid::Uuid>,
     ) -> Result<Vec<(MediaSummary, Vec<f32>)>, DomainError>;
+
+    // --- Tag Learning ---
+    fn save_tag_model(&self, tag_id: i64, weights: &[f64], bias: f64) -> Result<(), DomainError>;
+    fn get_tags_with_manual_counts(&self) -> Result<Vec<(i64, String, usize)>, DomainError>;
+    fn get_tags_with_auto_counts(&self) -> Result<Vec<(i64, String, usize)>, DomainError>;
+    fn count_auto_tags(&self, folder_id: Option<uuid::Uuid>) -> Result<usize, DomainError>;
+    fn update_auto_tags(
+        &self,
+        tag_id: i64,
+        media_ids_with_scores: &[(uuid::Uuid, f64)],
+        scope_media_ids: Option<&[uuid::Uuid]>,
+    ) -> Result<(), DomainError>;
+    fn get_random_embeddings(
+        &self,
+        limit: usize,
+        exclude_ids: &[uuid::Uuid],
+    ) -> Result<Vec<(uuid::Uuid, Vec<f32>)>, DomainError>;
+    fn get_tag_id_by_name(&self, name: &str) -> Result<Option<i64>, DomainError>;
+    fn get_manual_positives(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError>;
+    fn get_all_ids_with_tag(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError>;
 }
 
 pub trait AiProcessor: Send + Sync {

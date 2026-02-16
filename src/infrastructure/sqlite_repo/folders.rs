@@ -242,7 +242,7 @@ impl SqliteRepository {
         self.with_conn(|conn| {
             let order = if sort_asc { "ASC" } else { "DESC" };
 
-            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite
+            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite, m.size_bytes
                            FROM media m
                            JOIN folder_media fm ON fm.media_id = m.id
                            LEFT JOIN favorites f ON f.media_id = m.id
@@ -293,6 +293,7 @@ impl SqliteRepository {
                     let timestamp_str: String = row.get(4)?;
                     let original_date_str: String = row.get(5)?;
                     let is_favorite: bool = row.get(6)?;
+                    let size_bytes: i64 = row.get(7)?;
 
                     let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -329,6 +330,7 @@ impl SqliteRepository {
                             media_type,
                             uploaded_at,
                             original_date,
+                            size_bytes,
                             is_favorite,
                             tags: vec![],
                         },
@@ -368,7 +370,7 @@ impl SqliteRepository {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date
+                    "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, m.size_bytes
                  FROM media m
                  JOIN folder_media fm ON fm.media_id = m.id
                  WHERE fm.folder_id = ?1",
@@ -383,6 +385,7 @@ impl SqliteRepository {
                     let media_type: String = row.get(3)?;
                     let timestamp_str: String = row.get(4)?;
                     let original_date_str: String = row.get(5)?;
+                    let size_bytes: i64 = row.get(6)?;
 
                     let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -417,6 +420,7 @@ impl SqliteRepository {
                         media_type,
                         uploaded_at,
                         original_date,
+                        size_bytes,
                         is_favorite: false,
                         tags: vec![],
                     })

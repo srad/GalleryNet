@@ -47,11 +47,11 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
             onClick={selectionMode ? onSelect : onClick}
             draggable={!!onDragStart}
             onDragStart={onDragStart}
-            className={`group relative block overflow-hidden rounded-lg bg-gray-100 border shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 w-full text-left cursor-pointer ${
+            className={`group relative block overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800 border shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 w-full text-left cursor-pointer ${
 
                 selected
                     ? 'border-blue-500 ring-2 ring-blue-500/40'
-                    : 'border-gray-200/60'
+                    : 'border-gray-200/60 dark:border-gray-700/60'
             }`}
         >
             <div className="aspect-square w-full">
@@ -84,7 +84,7 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
                     <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
                         selected
                             ? 'bg-blue-500 border-blue-500'
-                            : 'bg-white/80 border-gray-400 hover:border-blue-400'
+                            : 'bg-white/80 dark:bg-gray-900/80 border-gray-400 hover:border-blue-400'
                     }`}>
                         {selected && (
                             <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
@@ -126,7 +126,7 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
             {/* Overlay gradient on hover */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 flex flex-col justify-end p-2 gap-1.5">
 
-                
+
                 {/* Badges container */}
                 <div className="flex flex-wrap gap-1 items-end">
                     {/* Size badge */}
@@ -135,14 +135,14 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
                             {formatBytes(item.size_bytes)}
                         </span>
                     )}
-                    
+
                     {/* Tag badges */}
                     {item.tags?.slice(0, 3).map(tag => (
-                        <span 
-                            key={tag.name} 
+                        <span
+                            key={tag.name}
                             className={`px-1.5 py-0.5 rounded backdrop-blur-sm border text-[9px] font-bold uppercase tracking-wider flex items-center gap-0.5 ${
-                                tag.is_auto 
-                                ? 'bg-indigo-500/40 border-indigo-400/30 text-indigo-100' 
+                                tag.is_auto
+                                ? 'bg-indigo-500/40 border-indigo-400/30 text-indigo-100'
                                 : 'bg-blue-500/40 border-blue-400/30 text-blue-100'
                             }`}
                         >

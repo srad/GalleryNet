@@ -17,7 +17,7 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
     const wrapperRef = useRef<HTMLDivElement>(null);
 
     // Normalize value to TagDetail[]
-    const tagDetails = useMemo(() => value.map(t => 
+    const tagDetails = useMemo(() => value.map(t =>
         typeof t === 'string' ? { name: t, is_auto: false } as TagDetail : t
     ), [value]);
 
@@ -33,7 +33,7 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
     const filteredSuggestions = useMemo(() => {
         if (!inputValue.trim()) return [];
         const lower = inputValue.toLowerCase();
-        return allTags.filter(t => 
+        return allTags.filter(t =>
             t.toLowerCase().includes(lower) && !tagNames.includes(t)
         );
     }, [allTags, inputValue, tagNames]);
@@ -81,19 +81,19 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
 
     return (
         <div ref={wrapperRef} className="relative w-full">
-            <div className={`flex flex-wrap items-center gap-1.5 p-2 bg-white border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 ${readOnly ? 'bg-gray-50' : ''}`}>
+            <div className={`flex flex-wrap items-center gap-1.5 p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 ${readOnly ? 'bg-gray-50 dark:bg-gray-900' : ''}`}>
                 {tagDetails.map(tag => (
-                    <span 
-                        key={tag.name} 
+                    <span
+                        key={tag.name}
                         className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md border ${
-                            tag.is_auto 
-                            ? 'text-indigo-800 bg-indigo-50 border-indigo-50' 
-                            : 'text-blue-700 bg-blue-50 border-blue-100'
+                            tag.is_auto
+                            ? 'text-indigo-800 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 border-indigo-50 dark:border-indigo-800'
+                            : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 border-blue-100 dark:border-blue-800'
                         }`}
                         title={tag.is_auto ? `Automatically assigned (confidence: ${Math.round((tag.confidence || 0) * 100)}%)` : undefined}
                     >
                         {tag.is_auto && (
-                            <svg className="w-3 h-3 text-indigo-800" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                            <svg className="w-3 h-3 text-indigo-800 dark:text-indigo-300" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
                             </svg>
                         )}
@@ -120,19 +120,19 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
                         onFocus={() => setShowSuggestions(true)}
                         autoFocus={autoFocus}
                         placeholder={value.length === 0 ? placeholder : ''}
-                        className="flex-1 min-w-[80px] text-sm outline-none bg-transparent text-gray-900 placeholder:text-gray-400"
+                        className="flex-1 min-w-[80px] text-sm outline-none bg-transparent text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                     />
                 )}
             </div>
 
             {showSuggestions && inputValue && (
-                <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto overflow-x-hidden">
+                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto overflow-x-hidden">
                     {filteredSuggestions.length > 0 ? (
                         filteredSuggestions.map(tag => (
                             <button
                                 key={tag}
                                 onClick={() => addTag(tag)}
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-900 truncate transition-colors"
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100 truncate transition-colors"
                             >
                                 {tag}
                             </button>
@@ -140,7 +140,7 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
                     ) : (
                         <button
                             onClick={() => addTag(inputValue)}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-900 italic transition-colors"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100 italic transition-colors"
                         >
                             Create tag "{inputValue}"
                         </button>

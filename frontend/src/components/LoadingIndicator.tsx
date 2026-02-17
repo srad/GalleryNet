@@ -7,13 +7,13 @@ interface LoadingIndicatorProps {
     className?: string;
 }
 
-export default function LoadingIndicator({ 
-    label, 
+export default function LoadingIndicator({
+    label,
     description,
-    variant = 'inline', 
+    variant = 'inline',
     size = 'md',
     color = 'text-blue-600',
-    className = "" 
+    className = ""
 }: LoadingIndicatorProps) {
     const sizeClasses = {
         sm: 'w-4 h-4',
@@ -30,10 +30,10 @@ export default function LoadingIndicator({
 
     if (variant === 'overlay') {
         return (
-            <div className={`absolute inset-0 z-20 flex items-start justify-center pt-20 bg-gray-50/40 backdrop-blur-[1px] ${className}`}>
-                <div className="flex items-center gap-3 px-5 py-3 bg-white rounded-2xl shadow-lg border border-gray-200 animate-in fade-in zoom-in duration-200">
+            <div className={`absolute inset-0 z-20 flex items-start justify-center pt-20 bg-gray-50/40 dark:bg-gray-900/40 backdrop-blur-[1px] ${className}`}>
+                <div className="flex items-center gap-3 px-5 py-3 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 animate-in fade-in zoom-in duration-200">
                     {spinner}
-                    {label && <span className="text-sm font-medium text-gray-700">{label}</span>}
+                    {label && <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{label}</span>}
                 </div>
             </div>
         );
@@ -43,8 +43,8 @@ export default function LoadingIndicator({
         return (
             <div className={`flex flex-col items-center justify-center gap-3 ${className}`}>
                 {spinner}
-                {label && <div className="text-gray-900 font-medium">{label}</div>}
-                {description && <div className="text-gray-400 text-sm">{description}</div>}
+                {label && <div className="text-gray-900 dark:text-gray-100 font-medium">{label}</div>}
+                {description && <div className="text-gray-400 dark:text-gray-500 text-sm">{description}</div>}
             </div>
         );
     }

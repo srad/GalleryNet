@@ -23,7 +23,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
     const similarityParam = searchParams.get('similarity');
 
     const [searchFile, setSearchFile] = useState<File | null>(null);
-    const [localSimilarity, setLocalSimilarity] = useState<number>(() => 
+    const [localSimilarity, setLocalSimilarity] = useState<number>(() =>
         similarityParam ? parseInt(similarityParam, 10) : 70
     );
     const [searchResults, setSearchResults] = useState<MediaItem[]>([]);
@@ -73,15 +73,15 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
     // Main search trigger effect
     useEffect(() => {
         const currentSim = similarityParam ? parseInt(similarityParam, 10) : localSimilarity;
-        
+
         const currentSource = sourceId;
         const currentFile = searchFile;
 
         // Check if anything meaningful changed
         const last = lastSearchRef.current;
-        const changed = !last || 
-                        last.source !== currentSource || 
-                        last.file !== currentFile || 
+        const changed = !last ||
+                        last.source !== currentSource ||
+                        last.file !== currentFile ||
                         last.sim !== currentSim;
 
         if (!changed) return;
@@ -175,7 +175,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
 
     const renderModal = () => {
         if (!selectedMediaId) return null;
-        
+
         const idx = searchResults.findIndex(m => m.id === selectedMediaId);
         // Find item in results, or use deep linking logic if needed (handled by MediaModal anyway)
         const item = idx !== -1 ? searchResults[idx] : { id: selectedMediaId, filename: '' } as MediaItem;
@@ -215,13 +215,13 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
     };
 
     return (
-        <div className="max-w-7xl mx-auto h-full flex flex-col">
+        <div className="h-full flex flex-col">
             <div className="flex items-center justify-between mb-4 md:mb-6 shrink-0">
-                <h2 className="text-2xl md:text-3xl font-bold text-gray-900 truncate">Visual Search</h2>
+                <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 truncate">Visual Search</h2>
                 {onLogout && (
                     <button
                         onClick={onLogout}
-                        className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-gray-500 hover:text-gray-900 hover:bg-white/50 rounded-xl transition-all active:scale-95 border border-transparent hover:border-gray-200"
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-white/50 dark:hover:bg-gray-800 rounded-xl transition-all active:scale-95 border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
                         title="Log out"
                     >
                         <LogoutIcon />
@@ -229,38 +229,38 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                 )}
             </div>
 
-            <div className="bg-white border border-gray-200 p-4 sm:p-6 md:p-8 rounded-2xl shadow-sm mb-4 sm:mb-8 shrink-0">
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 sm:p-6 md:p-8 rounded-2xl shadow-sm mb-4 sm:mb-8 shrink-0">
                 <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 items-start lg:items-center">
                     <div className="flex-1 w-full">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Reference Image</label>
-                        
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Reference Image</label>
+
                         {activeId ? (
-                            <div className="flex items-center gap-4 p-3 border border-gray-200 rounded-xl bg-gray-50">
-                                <img 
-                                    src={getThumbnailUrl(activeId)} 
-                                    alt="Reference" 
+                            <div className="flex items-center gap-4 p-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-900">
+                                <img
+                                    src={getThumbnailUrl(activeId)}
+                                    alt="Reference"
                                     className="w-16 h-16 object-cover rounded-lg shadow-sm"
                                 />
                                 <div className="flex-1">
-                                    <p className="text-sm font-medium text-gray-900">Searching by selected image</p>
-                                    <button 
+                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Searching by selected image</p>
+                                    <button
                                         onClick={clearSearch}
-                                        className="text-xs text-red-600 hover:text-red-800 font-semibold mt-1"
+                                        className="text-xs text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 font-semibold mt-1"
                                     >
                                         Clear / Pick New
                                     </button>
                                 </div>
                             </div>
                         ) : searchFile ? (
-                            <div className="flex items-center gap-4 p-3 border border-gray-200 rounded-xl bg-gray-50">
-                                <div className="w-16 h-16 bg-purple-100 rounded-lg flex items-center justify-center">
-                                    <PhotoIcon className="w-8 h-8 text-purple-600" />
+                            <div className="flex items-center gap-4 p-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-900">
+                                <div className="w-16 h-16 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
+                                    <PhotoIcon className="w-8 h-8 text-purple-600 dark:text-purple-400" />
                                 </div>
                                 <div className="flex-1">
-                                    <p className="text-sm font-medium text-gray-900">{searchFile.name}</p>
-                                    <button 
+                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{searchFile.name}</p>
+                                    <button
                                         onClick={clearSearch}
-                                        className="text-xs text-red-600 hover:text-red-800 font-semibold mt-1"
+                                        className="text-xs text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 font-semibold mt-1"
                                     >
                                         Clear / Pick New
                                     </button>
@@ -270,9 +270,9 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                             <div className="flex flex-col sm:flex-row gap-3">
                                 <button
                                     onClick={() => setShowPicker(true)}
-                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 rounded-xl transition-all font-medium text-sm shadow-sm group"
+                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950 text-gray-700 dark:text-gray-200 rounded-xl transition-all font-medium text-sm shadow-sm group"
                                 >
-                                    <PhotoIcon className="w-5 h-5 text-gray-400 group-hover:text-blue-500" />
+                                    <PhotoIcon className="w-5 h-5 text-gray-400 dark:text-gray-500 group-hover:text-blue-500" />
                                     Select from Library
                                 </button>
                                 <div className="relative flex-1">
@@ -285,8 +285,8 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                                         }}
                                         className="absolute inset-0 opacity-0 cursor-pointer"
                                     />
-                                    <div className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 hover:border-purple-400 hover:bg-purple-50 text-gray-700 rounded-xl transition-all font-medium text-sm shadow-sm">
-                                        <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <div className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 hover:border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950 text-gray-700 dark:text-gray-200 rounded-xl transition-all font-medium text-sm shadow-sm">
+                                        <svg className="w-5 h-5 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                                         </svg>
                                         Upload File
@@ -297,8 +297,8 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                     </div>
 
                     <div className="w-full lg:w-72">
-                        <label htmlFor="similarity" className="block text-sm font-medium text-gray-700 mb-2">
-                            Min Similarity: <span className="text-purple-600 font-bold">{localSimilarity}%</span>
+                        <label htmlFor="similarity" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                            Min Similarity: <span className="text-purple-600 dark:text-purple-400 font-bold">{localSimilarity}%</span>
                         </label>
                         <input
                             id="similarity"
@@ -309,7 +309,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                             onChange={(e) => setLocalSimilarity(Number(e.target.value))}
                             onPointerUp={handleSimilarityCommit}
                             onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') handleSimilarityCommit(); }}
-                            className="w-full accent-purple-600 cursor-pointer h-2 bg-gray-200 rounded-lg appearance-none"
+                            className="w-full accent-purple-600 cursor-pointer h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none"
                         />
                     </div>
                 </div>
@@ -317,23 +317,23 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
 
             <div className="flex-1 relative min-h-0">
                 {isSearching && searchResults.length > 0 && (
-                    <LoadingIndicator 
-                        variant="overlay" 
-                        label="Updating results..." 
-                        color="text-purple-600" 
+                    <LoadingIndicator
+                        variant="overlay"
+                        label="Updating results..."
+                        color="text-purple-600"
                     />
                 )}
 
                 {searchResults.length > 0 ? (
                     <div className="h-full overflow-y-auto">
-                        <h3 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-200 pb-2 sticky top-0 bg-gray-50 z-10 flex items-center justify-between">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4 border-b border-gray-200 dark:border-gray-700 pb-2 sticky top-0 bg-gray-50 dark:bg-gray-900 z-10 flex items-center justify-between">
                             <span>Matches Found ({searchResults.length})</span>
-                            <span className="text-xs font-normal text-gray-400">Similarity &ge; {similarityParam || localSimilarity}%</span>
+                            <span className="text-xs font-normal text-gray-400 dark:text-gray-500">Similarity &ge; {similarityParam || localSimilarity}%</span>
                         </h3>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 pb-8">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 3xl:grid-cols-10 gap-3 sm:gap-4 pb-8">
                             {searchResults.map((item) => (
-                                <MediaCard 
-                                    key={`search-${item.id}`} 
+                                <MediaCard
+                                    key={`search-${item.id}`}
                                     item={item}
                                     onClick={() => handleCardClick(item)}
                                     onDragStart={(e) => handleDragStart(item, e)}
@@ -343,17 +343,17 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                         </div>
                     </div>
                 ) : (
-                    <div className="h-full flex items-center justify-center text-gray-400">
+                    <div className="h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
                         {isSearching ? (
-                            <LoadingIndicator 
-                                variant="centered" 
-                                label="Analyzing library..." 
-                                size="lg" 
-                                color="text-purple-600" 
+                            <LoadingIndicator
+                                variant="centered"
+                                label="Analyzing library..."
+                                size="lg"
+                                color="text-purple-600"
                             />
                         ) : (
                             <div className="flex flex-col items-center gap-3">
-                                <PhotoIcon className="w-12 h-12 text-gray-200" />
+                                <PhotoIcon className="w-12 h-12 text-gray-200 dark:text-gray-700" />
                                 <span className="text-sm text-center max-w-xs">Select an image to find similar matches across your library.</span>
                             </div>
                         )}

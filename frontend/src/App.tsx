@@ -13,7 +13,7 @@ type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
 export default function App() {
     const location = useLocation();
     const navigate = useNavigate();
-    
+
     const [authState, setAuthState] = useState<AuthState>('loading');
     const [authRequired, setAuthRequired] = useState(false);
     const [folders, setFolders] = useState<Folder[]>([]);
@@ -27,7 +27,7 @@ export default function App() {
         window.addEventListener('gallerynet-unauthorized', handler);
         return () => window.removeEventListener('gallerynet-unauthorized', handler);
     }, []);
-    
+
     const [mediaFilter, setMediaFilter] = useState<MediaFilter>(() => {
         const saved = localStorage.getItem('galleryFilter');
         return saved === 'image' || saved === 'video' ? saved : 'all';
@@ -122,11 +122,11 @@ export default function App() {
     // Loading state: Hide everything until we know the auth status AND have folders if authenticated
     if (isInitialLoading || !appReady) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50">
-                <LoadingIndicator 
-                    label="Loading GalleryNet..." 
-                    variant="centered" 
-                    size="lg" 
+            <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
+                <LoadingIndicator
+                    label="Loading GalleryNet..."
+                    variant="centered"
+                    size="lg"
                 />
             </div>
         );
@@ -138,15 +138,15 @@ export default function App() {
     }
 
     return (
-        <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-800 overflow-hidden">
+        <div className="flex flex-col h-screen w-full bg-gray-50 dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 overflow-hidden">
             {/* Mobile header bar */}
-            <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 md:hidden flex-shrink-0">
+            <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 md:hidden flex-shrink-0">
                 <button
                     onClick={() => setSidebarOpen(true)}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     aria-label="Open menu"
                 >
-                    <svg className="w-6 h-6 text-gray-700" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <svg className="w-6 h-6 text-gray-700 dark:text-gray-200" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
                     </svg>
                 </button>
@@ -205,9 +205,9 @@ export default function App() {
                     </div>
 
                     <div className={isSearch ? 'p-4 md:p-8' : 'hidden'}>
-                        <SearchView 
-                            folders={folders} 
-                            refreshKey={refreshKey} 
+                        <SearchView
+                            folders={folders}
+                            refreshKey={refreshKey}
                             onFoldersChanged={fetchFolders}
                             onLogout={authRequired ? handleLogout : undefined}
                         />
@@ -235,4 +235,3 @@ export default function App() {
         </div>
     );
 }
-

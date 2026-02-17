@@ -5,6 +5,7 @@ import type {Folder} from '../types';
 import {apiFetch} from '../auth';
 import LibraryInfo from './LibraryInfo';
 import ConfirmDialog from './ConfirmDialog';
+import {useTheme} from '../hooks/useTheme';
 
 
 interface SidebarProps {
@@ -21,6 +22,7 @@ interface SidebarProps {
 
 export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled, mobileOpen, onMobileClose}: SidebarProps) {
     const location = useLocation();
+    const {isDark, toggle: toggleTheme} = useTheme();
     const [newFolderName, setNewFolderName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
 
@@ -159,7 +161,7 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
         dragCounterRef.current = 0;
         const fromIndex = dragIndex;
         const mediaData = e.dataTransfer.getData('application/x-gallerynet-media');
-        
+
         setDragIndex(null);
         setDropIndex(null);
         setMediaDropTargetId(null);
@@ -215,55 +217,74 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
 
     return (
         <aside className={`
-            fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 flex flex-col flex-shrink-0
+            fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col flex-shrink-0
             transition-transform duration-200 ease-in-out
             md:relative md:z-auto md:translate-x-0
             ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
         `}>
-            <div className="py-4 px-6 border-b border-gray-100 flex items-center justify-between">
+            <div className="py-4 px-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
                         GalleryNet
                     </h1>
                 </div>
-                {/* Close button (mobile only) */}
-                <button
-                    onClick={onMobileClose}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors md:hidden"
-                    aria-label="Close menu"
-                >
-                    <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
+                <div className="flex items-center gap-1">
+                    {/* Dark mode toggle */}
+                    <button
+                        onClick={toggleTheme}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                        title={isDark ? 'Light mode' : 'Dark mode'}
+                    >
+                        {isDark ? (
+                            <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+                            </svg>
+                        ) : (
+                            <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                            </svg>
+                        )}
+                    </button>
+                    {/* Close button (mobile only) */}
+                    <button
+                        onClick={onMobileClose}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors md:hidden"
+                        aria-label="Close menu"
+                    >
+                        <svg className="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             <nav className={`flex-1 p-4 space-y-2 overflow-y-auto ${disabled ? 'pointer-events-none' : ''}`}>
                 <Link
                     to="/"
                     onClick={onMobileClose}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/') ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/') ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                 >
                     <PhotoIcon/> Gallery
                 </Link>
                 <Link
                     to="/favorites"
                     onClick={onMobileClose}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/favorites') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/favorites') ? 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                 >
                     <HeartIcon/> Favorites
                 </Link>
                 <Link
                     to="/search"
                     onClick={onMobileClose}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/search') ? 'bg-purple-50 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/search') ? 'bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                 >
                     <SearchIcon/> Visual Search
                 </Link>
 
                 {/* Folders section */}
-                <div className="pt-3 mt-3 border-t border-gray-100">
-                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-4 mb-2">Folders</p>
+                <div className="pt-3 mt-3 border-t border-gray-100 dark:border-gray-700">
+                    <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider px-4 mb-2">Folders</p>
                     {folders.map((folder, index) => (
                         <div
                             key={folder.id}
@@ -275,8 +296,8 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                             onDragLeave={(e) => handleDragLeave(e, index)}
                             onDrop={(e) => handleDrop(e, index, folder.id)}
                             className={`relative transition-all duration-200 ${
-                                mediaDropTargetId === folder.id 
-                                    ? 'bg-blue-50 scale-[1.02] ring-2 ring-blue-400 rounded-lg z-10' 
+                                mediaDropTargetId === folder.id
+                                    ? 'bg-blue-50 dark:bg-blue-950 scale-[1.02] ring-2 ring-blue-400 rounded-lg z-10'
                                     : ''
                             } ${
                                 dropIndex === index && dragIndex !== null && dragIndex !== index
@@ -290,7 +311,7 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                             {renamingId === folder.id ? (
                                 /* Inline rename input */
                                 <div className="flex items-center gap-2 px-4 py-2">
-                                    <svg className="w-4 h-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                    <svg className="w-4 h-4 flex-shrink-0 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                                     </svg>
                                     <input
@@ -303,7 +324,7 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                                             if (e.key === 'Escape') cancelRename();
                                         }}
                                         onBlur={commitRename}
-                                        className="flex-1 min-w-0 text-sm px-1.5 py-0.5 rounded border border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                        className="flex-1 min-w-0 text-sm px-1.5 py-0.5 rounded border border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 dark:bg-gray-800 dark:text-gray-100 dark:border-blue-500"
                                     />
                                 </div>
                             ) : (
@@ -313,22 +334,20 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                                     onClick={onMobileClose}
                                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors group cursor-pointer ${
                                         mediaDropTargetId === folder.id
-                                            ? 'text-blue-700 bg-blue-50/50'
+                                            ? 'text-blue-700 dark:text-blue-300 bg-blue-50/50 dark:bg-blue-950/50'
                                             : isFolderActive(folder.id)
-                                                ? 'bg-amber-50 text-amber-700'
-                                                : 'text-gray-600 hover:bg-gray-100'
+                                                ? 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                                                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                                     } ${dragIndex === index ? 'opacity-50' : ''}`}
                                     onDoubleClick={(e) => startRename(e, folder)}
                                 >
 
                                     {/* Drag handle */}
-                                    <svg 
-                                        className="w-3 h-3 flex-shrink-0 text-gray-300 cursor-grab active:cursor-grabbing hover:text-gray-500" 
-                                        viewBox="0 0 6 10" 
+                                    <svg
+                                        className="w-3 h-3 flex-shrink-0 text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing hover:text-gray-500 dark:hover:text-gray-400"
+                                        viewBox="0 0 6 10"
                                         fill="currentColor"
-                                        onMouseDown={e => e.stopPropagation()} // Allow dragging only from handle? Or whole row?
-                                        // The draggable is on the parent div, so we don't need to do anything special here unless we want to limit drag handle.
-                                        // But the parent div has draggable.
+                                        onMouseDown={e => e.stopPropagation()}
                                     >
                                         <circle cx="1" cy="1" r="1"/><circle cx="5" cy="1" r="1"/>
                                         <circle cx="1" cy="5" r="1"/><circle cx="5" cy="5" r="1"/>
@@ -343,12 +362,12 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                                         </svg>
                                     ) : (
-                                        <span className="text-[10px] text-gray-400 flex-shrink-0">{folder.item_count}</span>
+                                        <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">{folder.item_count}</span>
                                     )}
                                     <button
 
                                         onClick={(e) => handleDeleteFolder(e, folder)}
-                                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 hover:text-red-600 transition-all flex-shrink-0"
+                                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-600 dark:hover:text-red-400 transition-all flex-shrink-0"
                                         title="Delete folder"
                                     >
 
@@ -370,13 +389,13 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                             onChange={(e) => setNewFolderName(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter') handleCreateFolder(); }}
                             placeholder="New folder..."
-                            className="flex-1 min-w-0 text-sm px-2 py-1.5 rounded-md border border-gray-200 focus:border-blue-400 focus:outline-none placeholder:text-gray-300"
+                            className="flex-1 min-w-0 text-sm px-2 py-1.5 rounded-md border border-gray-200 dark:border-gray-600 focus:border-blue-400 focus:outline-none placeholder:text-gray-300 dark:placeholder:text-gray-600 dark:bg-gray-800 dark:text-gray-100"
                             disabled={isCreating}
                         />
                         <button
                             onClick={handleCreateFolder}
                             disabled={isCreating || !newFolderName.trim()}
-                            className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 transition-colors flex-shrink-0"
+                            className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 disabled:opacity-30 transition-colors flex-shrink-0"
                             title="Create folder"
                         >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">

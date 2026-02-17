@@ -31,7 +31,8 @@
 </p>
 
 <p align="center">
-  Upload photos and videos, organize them into folders, and find visually similar images using AI &mdash; all running on your own hardware. No cloud, no API keys, fully private.
+  Upload photos and videos, organize them into folders and use integrated AI tools for search and sorting &mdash; all running on your own hardware.
+  No cloud, no API keys, fully private. High-performance, low resource usage, and only a single container without any other dependencies.
 </p>
 
 ---
@@ -53,7 +54,7 @@
 - **Video Support** &mdash; Upload any common video format with automatic frame extraction for thumbnails and AI features
 - **EXIF Metadata** &mdash; View camera details, date, GPS, exposure, and more
 - **Deep Linking** &mdash; Bookmarkable URLs for folders, favorites, search states, and individual items
-- **Password Protection** &mdash; Optional single-password auth with rate limiting and secure sessions
+- **Password Protection** &mdash; Optional single-password auth with rate limiting and secure sessions. No complex user management, only a simple password.
 - **Responsive UI** &mdash; Infinite-scroll grid, keyboard shortcuts, touch swipe, and full mobile support
 - **100% Self-Hosted** &mdash; No cloud, no telemetry. Your data stays yours.
 
@@ -73,21 +74,6 @@
 ## Quick Start with Docker
 
 The easiest way to run GalleryNet is with Docker:
-
-```bash
-docker run -d \
-  --name gallerynet \
-  -p 3000:3000 \
-  -v gallerynet-data:/app/data \
-  -e DATABASE_PATH=/app/data/gallery.db \
-  -e UPLOAD_DIR=/app/data/uploads \
-  -e THUMBNAIL_DIR=/app/data/thumbnails \
-  sedrad/gallerynet
-```
-
-Then open **http://localhost:3000** in your browser.
-
-### With Password Protection
 
 ```bash
 docker run -d \

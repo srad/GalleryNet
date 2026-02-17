@@ -391,10 +391,10 @@ unsafe fn windows_disk_free(path: *const u16, free: &mut u64, total: &mut u64) {
     #[link(name = "kernel32")]
     extern "system" {
         fn GetDiskFreeSpaceExW(
-            lpDirectoryName: *const u16,
-            lpFreeBytesAvailableToCaller: *mut u64,
-            lpTotalNumberOfBytes: *mut u64,
-            lpTotalNumberOfFreeBytes: *mut u64,
+            lp_directory_name: *const u16,
+            lp_free_bytes_available_to_caller: *mut u64,
+            lp_total_number_of_bytes: *mut u64,
+            lp_total_number_of_free_bytes: *mut u64,
         ) -> i32;
     }
     let mut free_to_caller: u64 = 0;
@@ -898,7 +898,7 @@ async fn batch_download_stream_handler(
         info!("Streaming zip download finished: {}", filename);
     });
 
-    let stream = tokio_util::io::ReaderStream::new(reader);
+    let stream = ReaderStream::new(reader);
     let body = Body::from_stream(stream);
 
     let mut headers = HeaderMap::new();
@@ -991,7 +991,7 @@ where
         info!("Streaming zip finished: {}", name_for_log);
     });
 
-    let stream = tokio_util::io::ReaderStream::new(reader);
+    let stream = ReaderStream::new(reader);
     let body = Body::from_stream(stream);
     
     let mut headers = HeaderMap::new();
@@ -1013,7 +1013,7 @@ where
     I: IntoIterator,
     I::Item: HasFilenames,
 {
-    let mut used_names = std::collections::HashMap::<String, usize>::new();
+    let mut used_names = HashMap::<String, usize>::new();
     items
         .into_iter()
         .map(|item| {
@@ -1283,9 +1283,6 @@ async fn download_folder_handler(
     if items.is_empty() {
         return Err(DomainError::Io("Folder is empty".to_string()));
     }
-
-    let file_count = items.len();
-    let upload_dir = state.upload_dir.clone();
 
     // Sanitize folder name for the zip filename
     let safe_name: String = folder.name.chars()

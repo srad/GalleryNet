@@ -147,15 +147,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let headers = response.headers_mut();
             headers.insert(
                 axum::http::header::CACHE_CONTROL,
-                axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+                HeaderValue::from_static("public, max-age=31536000, immutable"),
             );
             headers.insert(
                 axum::http::header::CONTENT_DISPOSITION,
-                axum::http::HeaderValue::from_static("attachment"),
+                HeaderValue::from_static("attachment"),
             );
             headers.insert(
                 axum::http::header::HeaderName::from_static("x-content-type-options"),
-                axum::http::HeaderValue::from_static("nosniff"),
+                HeaderValue::from_static("nosniff"),
             );
             response
         }));

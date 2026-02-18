@@ -55,8 +55,9 @@ describe('useWebSocket', () => {
 
     it('connects to the correct URL', () => {
         renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, true));
-        expect(global.WebSocket).toHaveBeenCalledWith('ws://localhost:3000/api/ws');
+        expect(WebSocket).toHaveBeenCalledWith('ws://localhost:3000/api/ws');
     });
+
 
     it('handles MediaCreated message', () => {
         renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, true));
@@ -147,18 +148,19 @@ describe('useWebSocket', () => {
     it('reconnects on close', () => {
         renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, true));
         
-        expect(global.WebSocket).toHaveBeenCalledTimes(1);
+        expect(WebSocket).toHaveBeenCalledTimes(1);
 
         mockWebSocket.onclose();
 
         // Fast forward time for reconnection
         vi.advanceTimersByTime(5000);
 
-        expect(global.WebSocket).toHaveBeenCalledTimes(2);
+        expect(WebSocket).toHaveBeenCalledTimes(2);
     });
 
     it('does not connect when disabled', () => {
         renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, false));
-        expect(global.WebSocket).not.toHaveBeenCalled();
+        expect(WebSocket).not.toHaveBeenCalled();
     });
+
 });

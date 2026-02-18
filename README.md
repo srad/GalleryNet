@@ -82,6 +82,7 @@
   management, only a simple password.
 - **Responsive UI** &mdash; Infinite-scroll grid, keyboard shortcuts, touch swipe, and full mobile support
 - **Real-time Sync** &mdash; WebSocket-powered instant updates across all browser clients; all users can see new uploads, favorite toggles, and folder changes immediately as they happen
+- **Self-Healing** &mdash; Automatically detects and repairs missing thumbnails or metadata in the background
 - **100% Self-Hosted** &mdash; No cloud, no telemetry. Your data stays yours.
 
 
@@ -218,6 +219,7 @@ src/
 | `POST`   | `/api/media/{id}/favorite`        | Toggle favorite status. Body: `{"favorite": true/false}`                             |
 | `DELETE` | `/api/media/{id}`                 | Delete single media item                                                             |
 | `POST`   | `/api/media/batch-delete`         | Batch delete. Body: `["uuid1", ...]`                                                 |
+| `POST`   | `/api/media/fix-thumbnails`       | Trigger background repair of missing thumbnails/metadata                             |
 | `POST`   | `/api/media/download/plan`        | Create download plan (partitions large sets into <2GB parts). Body: `["uuid1", ...]` |
 | `GET`    | `/api/media/download/stream/{id}` | Stream a specific download part incrementally                                        |
 | `POST`   | `/api/media/download`             | Simple batch download (if under 2GB). Body: `["uuid1", ...]`                         |

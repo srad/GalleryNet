@@ -17,7 +17,8 @@ src/
 │   ├── list.rs      # ListMediaUseCase — paginated media listing with optional media_type filter and sort
 │   ├── delete.rs    # DeleteMediaUseCase — single and batch delete (DB + files)
 │   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison (capped at 10k items, 5M edges)
-│   └── tag_learning.rs # TagLearningUseCase — Linear SVM with class-weighted training (pos_neg_weights), Platt-calibrated probabilities, hard negative mining, outlier filtering
+│   ├── tag_learning.rs # TagLearningUseCase — Linear SVM with class-weighted training (pos_neg_weights), Platt-calibrated probabilities, hard negative mining, outlier filtering
+│   └── maintenance.rs # FixThumbnailsUseCase — Scans for media with missing phash ('no_hash'), re-generates thumbnails, phash, features, and updates DB
 ├── infrastructure/  # Trait implementations (adapters)
 │   ├── sqlite_repo/       # SQLite + sqlite-vec (connection pool, split into submodules)
 │   │   ├── mod.rs         # Pool struct, schema init, trait impl delegation, tag helpers
@@ -28,7 +29,7 @@ src/
 │   ├── ort_processor.rs   # MobileNetV3 ONNX inference via ort crate (session pool)
 │   └── phash_generator.rs # Perceptual hashing for duplicate detection
 ├── presentation/    # HTTP layer
-│   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, batch-download (streaming), stats, login/logout, folders. Rate limiting, filename sanitization, error message sanitization, part-based zip splitting.
+│   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, fix-thumbnails, batch-download (streaming), stats, login/logout, folders. Rate limiting, filename sanitization, error message sanitization, part-based zip splitting.
 │   └── auth.rs      # Authentication middleware, AuthConfig, HMAC token generation/verification, constant-time password comparison, session generation counter for invalidation
 ├── events.ts            # Application-wide selective media update bus (zero-latency local sync)
 ├── useWebSocket.ts      # WebSocket connection manager — heartbeat, reconnection jitter, lag recovery
@@ -217,6 +218,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `GET /api/stats` — Server statistics: `{version, total_files, total_images, total_videos, total_size_bytes, disk_free_bytes, disk_total_bytes}`.
 - `DELETE /api/media/{id}` — Delete single media item. Returns 204 or 404.
 - `POST /api/media/batch-delete` — JSON body `["uuid1", "uuid2", ...]`. Returns `{"deleted": N}`. Deletes DB rows, embeddings, originals, and thumbnails.
+- `POST /api/media/fix-thumbnails` — Triggers background repair of media items with missing perceptual hashes (re-generates thumbnails, features, and metadata).
 - `POST /api/media/download/plan` — JSON body `["uuid1", "uuid2", ...]`. Returns `DownloadPlan` with part IDs and size estimates. Partitions large requests into parts under 2GB.
 - `GET /api/media/download/stream/{part_id}` — Incremental zip stream for a specific plan part. Uses `async_zip` for on-the-fly streaming with `Compression::Stored`.
 - `POST /api/media/download` — Legacy/simple batch download. Returns single zip stream if under 2GB.
@@ -271,6 +273,7 @@ External: `ffmpeg` (video frame extraction).
 - `MediaSummary` (list endpoint) doesn't include `exif_json` — the separate `GET /api/media/{id}` endpoint returns full `MediaItem` with EXIF for the modal
 - **Real-time Synchronization**: WebSocket updates utilize a serialize-once, zero-cloning broadcast architecture. `MediaUpdated` events include full metadata but strip `exif_json` to minimize bandwidth while allowing instant UI rendering of newly favorited or discovered items.
 - **Sorting Resilience**: The gallery uses a centralized sorting engine that re-evaluates item positions whenever new media is created or metadata (date/size) changes, ensuring correct order without reloads.
+- **Self-Healing**: The system automatically triggers `POST /api/media/fix-thumbnails` on startup and daily (via cron/script) to repair any media items that might have failed processing during upload (identified by `phash='no_hash'`).
 - Disk space detection is platform-conditional: `GetDiskFreeSpaceExW` on Windows, `libc::statvfs` on Linux/macOS
 
 - App version is read from `Cargo.toml` at compile time via `env!("CARGO_PKG_VERSION")`

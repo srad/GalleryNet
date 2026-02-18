@@ -10,14 +10,13 @@ RUN npm run build
 
 # Stage 2: Rust builder
 FROM ubuntu:24.04 AS builder
-
-# Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
+    cmake \
     pkg-config \
     libssl-dev \
     ffmpeg \
@@ -29,7 +28,13 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
+
+
+# Enable hardware-specific optimizations (build machine must match runtime machine)
+ENV RUSTFLAGS="-C target-cpu=native"
+
 # Copy dependency files first to cache dependencies
+
 COPY Cargo.toml Cargo.lock ./
 # Create a dummy main.rs to build dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
@@ -45,12 +50,14 @@ RUN touch src/main.rs
 RUN cargo test
 RUN cargo build --release
 
+
 # Find the downloaded onnxruntime library (libonnxruntime.so*)
 # It is typically in target/release/build/ort-.../out/
 RUN find target/release/build -name "libonnxruntime*.so*" -type f -exec cp {} /app/ \;
 
 # Stage 3: Runtime
 FROM ubuntu:24.04
+
 
 WORKDIR /app
 
@@ -60,6 +67,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
 
 # Copy the binary
 COPY --from=builder /app/target/release/gallerynet /app/gallerynet

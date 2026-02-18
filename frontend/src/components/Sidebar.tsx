@@ -265,7 +265,7 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                     onClick={onMobileClose}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${isActive('/') ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                 >
-                    <PhotoIcon/> Gallery
+                    <PhotoIcon/> Library
                 </Link>
                 <Link
                     to="/favorites"

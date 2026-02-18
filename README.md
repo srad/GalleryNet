@@ -29,6 +29,9 @@
 <!--
   <img src="https://img.shields.io/badge/ONNX_Runtime-MobileNetV3-green?style=flat-square" alt="ONNX Runtime">
 -->
+  <a href="https://github.com/srad/PhotoLense/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue?style=flat-square" alt="License">
+  </a>
 </p>
 
 <p align="center">

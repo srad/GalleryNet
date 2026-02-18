@@ -1,12 +1,13 @@
 import { useEffect, useRef, useCallback } from 'react';
+import type { MediaItem, Folder } from './types';
 import { fireMediaUpdate } from './events';
 
 type WsMessage = {
     type: 'MediaCreated',
-    data: { item: any }
+    data: { item: MediaItem }
 } | {
     type: 'MediaUpdated',
-    data: { id: string, item: any }
+    data: { id: string, item: Partial<MediaItem> }
 } | {
     type: 'MediaDeleted',
     data: { id: string }
@@ -18,7 +19,7 @@ type WsMessage = {
     data: { ids: string[], tags: string[] }
 } | {
     type: 'FolderCreated',
-    data: { folder: any }
+    data: { folder: Folder }
 } | {
     type: 'FolderDeleted',
     data: { id: string }
@@ -43,11 +44,21 @@ type WsMessage = {
 } | {
     type: 'UploadComplete',
     data: null
+} | {
+    type: 'ThumbnailFixStarted',
+    data: null
+} | {
+    type: 'ThumbnailFixCompleted',
+    data: { count: number }
 };
 
-export function useWebSocket(onFoldersChanged: () => void, onUploadComplete: () => void, enabled: boolean = true) {
+export function useWebSocket(
+    onFoldersChanged: () => void, 
+    onUploadComplete: () => void, 
+    onThumbnailFixStatusChange: (isFixing: boolean) => void,
+    enabled: boolean = true
+) {
     const socketRef = useRef<WebSocket | null>(null);
-    const reconnectTimeoutRef = useRef<number | null>(null);
     const debounceTimeoutRef = useRef<number | null>(null);
 
     const debouncedUploadComplete = useCallback(() => {
@@ -60,91 +71,97 @@ export function useWebSocket(onFoldersChanged: () => void, onUploadComplete: () 
         }, 500); // Wait for 500ms of quiet before refreshing
     }, [onUploadComplete]);
 
-    const connect = useCallback(() => {
+    useEffect(() => {
         if (!enabled) return;
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        const wsUrl = `${protocol}//${host}/api/ws`;
+        let socket: WebSocket | null = null;
+        let reconnectTimeout: number | null = null;
 
-        const socket = new WebSocket(wsUrl);
-        socketRef.current = socket;
+        const connect = () => {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            const wsUrl = `${protocol}//${host}/api/ws`;
 
-        socket.onopen = () => {
-            console.log('WebSocket connected');
-            if (reconnectTimeoutRef.current) {
-                window.clearTimeout(reconnectTimeoutRef.current);
-                reconnectTimeoutRef.current = null;
-            }
-        };
+            socket = new WebSocket(wsUrl);
+            socketRef.current = socket;
 
-        socket.onmessage = (event) => {
-            try {
-                const msg: WsMessage = JSON.parse(event.data);
-                console.log('WS Message:', msg);
-
-                switch (msg.type) {
-                    case 'MediaCreated':
-                        fireMediaUpdate(msg.data.item.id, msg.data.item, 'create');
-                        break;
-                    case 'MediaUpdated':
-                        fireMediaUpdate(msg.data.id, msg.data.item);
-                        break;
-                    case 'MediaDeleted':
-                        fireMediaUpdate(msg.data.id, {}, 'delete');
-                        onFoldersChanged();
-                        break;
-                    case 'MediaBatchDeleted':
-                        msg.data.ids.forEach(id => fireMediaUpdate(id, {}, 'delete'));
-                        onFoldersChanged();
-                        break;
-                    case 'MediaTagsUpdated':
-                        msg.data.ids.forEach(id => fireMediaUpdate(id, { tags: msg.data.tags.map(name => ({ name, is_auto: false })) }));
-                        break;
-                    case 'FolderCreated':
-                    case 'FolderDeleted':
-                    case 'FolderRenamed':
-                    case 'FoldersReordered':
-                    case 'MediaAddedToFolder':
-                    case 'MediaRemovedFromFolder':
-                        onFoldersChanged();
-                        break;
-                    case 'TagLearningComplete':
-                    case 'FullRefresh':
-                    case 'UploadComplete':
-                        debouncedUploadComplete();
-                        break;
+            socket.onopen = () => {
+                console.log('WebSocket connected');
+                if (reconnectTimeout) {
+                    window.clearTimeout(reconnectTimeout);
+                    reconnectTimeout = null;
                 }
-            } catch (err) {
-                console.error('Failed to parse WS message', err);
-            }
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const msg: WsMessage = JSON.parse(event.data);
+                    console.log('WS Message:', msg);
+
+                    switch (msg.type) {
+                        case 'MediaCreated':
+                            fireMediaUpdate(msg.data.item.id!, msg.data.item, 'create');
+                            break;
+                        case 'MediaUpdated':
+                            fireMediaUpdate(msg.data.id, msg.data.item);
+                            break;
+                        case 'MediaDeleted':
+                            fireMediaUpdate(msg.data.id, {}, 'delete');
+                            onFoldersChanged();
+                            break;
+                        case 'MediaBatchDeleted':
+                            msg.data.ids.forEach(id => fireMediaUpdate(id, {}, 'delete'));
+                            onFoldersChanged();
+                            break;
+                        case 'MediaTagsUpdated':
+                            msg.data.ids.forEach(id => fireMediaUpdate(id, { tags: msg.data.tags.map(name => ({ name, is_auto: false })) }));
+                            break;
+                        case 'FolderCreated':
+                        case 'FolderDeleted':
+                        case 'FolderRenamed':
+                        case 'FoldersReordered':
+                        case 'MediaAddedToFolder':
+                        case 'MediaRemovedFromFolder':
+                            onFoldersChanged();
+                            break;
+                        case 'TagLearningComplete':
+                        case 'FullRefresh':
+                        case 'UploadComplete':
+                            debouncedUploadComplete();
+                            break;
+                        case 'ThumbnailFixStarted':
+                            onThumbnailFixStatusChange(true);
+                            break;
+                        case 'ThumbnailFixCompleted':
+                            onThumbnailFixStatusChange(false);
+                            break;
+                    }
+                } catch (err) {
+                    console.error('Failed to parse WS message', err);
+                }
+            };
+
+            socket.onclose = () => {
+                console.log('WebSocket disconnected, reconnecting...');
+                socket = null;
+                socketRef.current = null;
+                // Add jitter to avoid thundering herd on server restart
+                const jitter = Math.random() * 2000;
+                reconnectTimeout = window.setTimeout(connect, 3000 + jitter);
+            };
+
+            socket.onerror = (err) => {
+                console.error('WebSocket error:', err);
+                socket?.close();
+            };
         };
 
-        socket.onclose = () => {
-            console.log('WebSocket disconnected, reconnecting...');
-            socketRef.current = null;
-            // Add jitter to avoid thundering herd on server restart
-            const jitter = Math.random() * 2000;
-            reconnectTimeoutRef.current = window.setTimeout(connect, 3000 + jitter);
-        };
+        connect();
 
-        socket.onerror = (err) => {
-            console.error('WebSocket error:', err);
-            socket.close();
-        };
-    }, [enabled, onFoldersChanged, debouncedUploadComplete]);
-
-    useEffect(() => {
-        if (enabled) {
-            connect();
-        }
         return () => {
-            if (socketRef.current) {
-                socketRef.current.close();
-            }
-            if (reconnectTimeoutRef.current) {
-                window.clearTimeout(reconnectTimeoutRef.current);
-            }
+            if (socket) socket.close();
+            if (reconnectTimeout) window.clearTimeout(reconnectTimeout);
+            socketRef.current = null;
         };
-    }, [enabled, connect]);
+    }, [enabled, onFoldersChanged, debouncedUploadComplete, onThumbnailFixStatusChange]);
 }

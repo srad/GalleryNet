@@ -9,7 +9,7 @@ import TagFilter from './TagFilter';
 import TagInput from './TagInput';
 import { apiClient } from '../api';
 import type { DownloadPlan } from '../api';
-import { apiFetch, fireUnauthorized } from '../auth';
+import { fireUnauthorized } from '../auth';
 import { fireMediaUpdate } from '../events';
 
 
@@ -166,8 +166,9 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
     // --- Selective updates from events ---
     useEffect(() => {
-        const handler = (e: any) => {
-            const { id, item: updatedFields, action } = e.detail;
+        const handler = (e: Event) => {
+            const customEvent = e as CustomEvent;
+            const { id, item: updatedFields, action } = customEvent.detail;
             
             setMedia(prev => {
                 const idx = prev.findIndex(m => m.id === id);
@@ -232,7 +233,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
         window.addEventListener('gallerynet-media-update', handler);
         return () => window.removeEventListener('gallerynet-media-update', handler);
-    }, [viewFavorites, filterTags, sortItems]);
+    }, [viewFavorites, filterTags, sortItems, activeFolderId, filter]);
 
 
 
@@ -363,13 +364,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     try {
                         const json = JSON.parse(xhr.responseText);
                         if (json.id && activeFolderId) {
-                            apiFetch(`/api/folders/${activeFolderId}/media`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify([json.id]),
-                            }).catch(() => {});
+                            apiClient.addMediaToFolder(activeFolderId, [json.id]).catch(e => console.error('Failed to auto-add to folder:', e));
                         }
-                    } catch { /* ignore */ }
+                    } catch (e) {
+                        console.error('Failed to parse upload response:', e);
+                    }
                     setUploadState(prev => prev ? { ...prev, done: prev.done + 1 } : prev);
                     onUploadComplete?.();
                 } else if (xhr.status === 401) {
@@ -381,7 +380,9 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                     try {
                         const json = JSON.parse(xhr.responseText);
                         if (json.error) reason = json.error;
-                    } catch { /* ignore */ }
+                    } catch (e) {
+                        console.error('Failed to parse error response:', e);
+                    }
                     setUploadState(prev => prev ? {
                         ...prev,
                         failed: prev.failed + 1,
@@ -552,7 +553,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
             console.error('Failed to merge/refresh media:', e);
         }
-    }, [activeFolderId, viewFavorites, filterTags]);
+    }, [activeFolderId, viewFavorites, filterTags, sortItems]);
 
 
 
@@ -716,8 +717,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 
                 try {
                     await apiClient.applyTagModel(tagId, activeFolderId, ac.signal);
-                } catch (e: any) {
-                    if (e.name === 'AbortError') throw e;
+                } catch (e: unknown) {
+                    if (e instanceof Error && e.name === 'AbortError') throw e;
                     errors.push(`${tagName}: Network error or crash`);
                 }
             }
@@ -740,8 +741,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 message
             });
             onUploadComplete?.(); // Refresh metadata
-        } catch (e: any) {
-            if (e.name === 'AbortError') {
+        } catch (e: unknown) {
+            if (e instanceof Error && e.name === 'AbortError') {
                 console.log('Auto-tagging cancelled');
             } else {
                 console.error('Auto-tag error', e);
@@ -791,7 +792,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         const nextPage = pageRef.current + 1;
         pageRef.current = nextPage;
         fetchPage(nextPage, filter, sortOrderRef.current, true);
-    }, [filter, fetchPage]);
+    }, [filter, fetchPage, isGrouped]);
 
     // --- IntersectionObserver on sentinel ---
     useEffect(() => {
@@ -813,7 +814,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
         observer.observe(sentinel);
         return () => observer.disconnect();
-    }, [loadMore]);
+    }, [loadMore, isLoading]);
 
     // --- Selection handlers ---
     const handleSelect = useCallback((filename: string, e: React.MouseEvent) => {
@@ -851,7 +852,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             lastClickedRef.current = filename;
             return next;
         });
-    }, []); // Stable callback
+    }, [singleSelect]); // Stable callback
 
     const handleCardClick = useCallback((item: MediaItem) => {
         if (item.id) {
@@ -1038,8 +1039,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         try {
             const plan = await apiClient.getFolderDownloadPlan(activeFolderId, abortController.signal);
             await executeDownloadParts(plan);
-        } catch (e: any) {
-            if (e.name !== 'AbortError') console.error('Download error:', e);
+        } catch (e: unknown) {
+            if (e instanceof Error && e.name !== 'AbortError') console.error('Download error:', e);
         } finally {
             setIsDownloading(false);
             setDownloadProgress(null);
@@ -1073,8 +1074,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             const plan = await apiClient.getDownloadPlan(ids, abortController.signal);
             await executeDownloadParts(plan);
             exitSelectionMode();
-        } catch (e: any) {
-            if (e.name !== 'AbortError') console.error('Download error:', e);
+        } catch (e: unknown) {
+            if (e instanceof Error && e.name !== 'AbortError') console.error('Download error:', e);
         } finally {
             setIsDownloading(false);
             setDownloadProgress(null);
@@ -1172,7 +1173,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         // Snapshot current selection so additive drag (Shift/Ctrl) can merge with it
         preDragSelectionRef.current = new Set(selected);
         // Don't set marquee yet — wait until the mouse moves enough (deadzone)
-    }, [selectionMode, getScrollParent, selected]);
+    }, [selectionMode, getScrollParent, selected, singleSelect]);
 
     // Marquee: mousemove & mouseup — attach to document so drag works even outside the grid
     useEffect(() => {

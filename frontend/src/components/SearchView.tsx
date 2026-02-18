@@ -68,7 +68,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                 setLocalSimilarity(val);
             }
         }
-    }, [similarityParam]);
+    }, [similarityParam, localSimilarity]);
 
     // Main search trigger effect
     useEffect(() => {
@@ -105,7 +105,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
         }
 
         lastSearchRef.current = { source: currentSource, file: currentFile, sim: currentSim };
-    }, [sourceId, similarityParam, searchFile, handleSearchById, handleSearchByFile]);
+    }, [sourceId, similarityParam, searchFile, handleSearchById, handleSearchByFile, localSimilarity]);
 
     const handleSimilarityCommit = useCallback(() => {
         setSearchParams(prev => {

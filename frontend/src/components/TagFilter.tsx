@@ -1,16 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { apiFetch } from '../auth';
+import { apiClient } from '../api';
+import type { TagCount } from '../types';
 import { TagIcon } from './Icons';
 
 interface TagFilterProps {
     selectedTags: string[];
     onChange: (tags: string[]) => void;
     refreshKey?: number;
-}
-
-interface TagCount {
-    name: string;
-    count: number;
 }
 
 export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFilterProps) {
@@ -20,10 +16,9 @@ export default function TagFilter({ selectedTags, onChange, refreshKey }: TagFil
     const wrapperRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        apiFetch('/api/tags')
-            .then(res => res.ok ? res.json() : [])
+        apiClient.getTags()
             .then(setAllTags)
-            .catch(() => {});
+            .catch(e => console.error('Failed to load tags:', e));
     }, [refreshKey]);
 
     const filteredTags = useMemo(() => {

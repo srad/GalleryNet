@@ -1,5 +1,5 @@
 import { apiFetch } from './auth';
-import type { MediaItem, MediaGroup, MediaFilter } from './types';
+import type { MediaItem, MediaGroup, MediaFilter, Stats, TagCount, Folder } from './types';
 
 export interface DownloadPart {
     id: string;
@@ -26,6 +26,77 @@ export class ApiClient {
         }
         // Fallback for tests
         return `http://localhost:3000${path}`;
+    }
+
+    async checkAuth(): Promise<{ authenticated: boolean; required: boolean }> {
+        const res = await apiFetch(this.getUrl('/api/auth-check'));
+        if (!res.ok) throw new Error('Failed to check auth');
+        return res.json();
+    }
+
+    async logout(): Promise<void> {
+        await apiFetch(this.getUrl('/api/logout'), { method: 'POST' });
+    }
+
+    async getFolders(): Promise<Folder[]> {
+        const res = await apiFetch(this.getUrl('/api/folders'));
+        if (!res.ok) throw new Error('Failed to fetch folders');
+        return res.json();
+    }
+
+    async getTags(): Promise<TagCount[]> {
+        const res = await apiFetch(this.getUrl('/api/tags'));
+        if (!res.ok) throw new Error('Failed to fetch tags');
+        return res.json();
+    }
+
+    async getStats(): Promise<Stats> {
+        const res = await apiFetch(this.getUrl('/api/stats'));
+        if (!res.ok) throw new Error('Failed to fetch stats');
+        return res.json();
+    }
+
+    async createFolder(name: string): Promise<void> {
+        const res = await apiFetch(this.getUrl('/api/folders'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        if (!res.ok) throw new Error('Failed to create folder');
+    }
+
+    async deleteFolder(id: string): Promise<void> {
+        const res = await apiFetch(this.getUrl(`/api/folders/${id}`), {
+            method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to delete folder');
+    }
+
+    async renameFolder(id: string, name: string): Promise<void> {
+        const res = await apiFetch(this.getUrl(`/api/folders/${id}`), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        if (!res.ok) throw new Error('Failed to rename folder');
+    }
+
+    async reorderFolders(ids: string[]): Promise<void> {
+        const res = await apiFetch(this.getUrl('/api/folders/reorder'), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ids),
+        });
+        if (!res.ok) throw new Error('Failed to reorder folders');
+    }
+
+    async updateMediaTags(id: string, tags: string[]): Promise<void> {
+        const res = await apiFetch(this.getUrl(`/api/media/${id}/tags`), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tags }),
+        });
+        if (!res.ok) throw new Error('Failed to update tags');
     }
 
     async getDownloadPlan(ids: string[], signal?: AbortSignal): Promise<DownloadPlan> {

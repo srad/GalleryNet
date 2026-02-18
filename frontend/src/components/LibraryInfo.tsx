@@ -1,16 +1,7 @@
-import {useState, useEffect, useCallback} from 'react';
+import {useState, useEffect} from 'react';
 import {ChevronDownIcon} from './Icons';
-import {apiFetch} from '../auth';
-
-interface Stats {
-    version: string;
-    total_files: number;
-    total_images: number;
-    total_videos: number;
-    total_size_bytes: number;
-    disk_free_bytes: number;
-    disk_total_bytes: number;
-}
+import {apiClient} from '../api';
+import type {Stats} from '../types';
 
 function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
@@ -24,16 +15,17 @@ export default function LibraryInfo({refreshKey}: { refreshKey: number }) {
     const [stats, setStats] = useState<Stats | null>(null);
     const [isStatsExpanded, setIsStatsExpanded] = useState(false);
 
-    const fetchStats = useCallback(async () => {
-        try {
-            const res = await apiFetch('/api/stats');
-            if (res.ok) setStats(await res.json());
-        } catch { /* ignore */ }
-    }, []);
-
     useEffect(() => {
+        const fetchStats = async () => {
+            try {
+                const data = await apiClient.getStats();
+                setStats(data);
+            } catch (e) {
+                console.error('Failed to load library stats:', e);
+            }
+        };
         fetchStats();
-    }, [fetchStats, refreshKey]);
+    }, [refreshKey]);
 
     const diskUsedPercent = stats && stats.disk_total_bytes > 0
         ? Math.round(((stats.disk_total_bytes - stats.disk_free_bytes) / stats.disk_total_bytes) * 100)
@@ -79,8 +71,8 @@ export default function LibraryInfo({refreshKey}: { refreshKey: number }) {
 
             <div className={`grid transition-all duration-300 ease-in-out ${isStatsExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
                 <div className="overflow-hidden">
-                    <div className="px-4 pb-6">
-                        <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3 space-y-2.5">
+                    <div className="px-4 pb-6 bg-gray-50 dark:bg-gray-800">
+                        <div className="p-3 space-y-2.5">
                             <div className="flex justify-between items-center">
                                 <p className="text-[10px] text-gray-400 dark:text-gray-500">System Info</p>
                                 <p className="text-[9px] text-gray-400 dark:text-gray-500">v{stats.version}</p>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { apiFetch } from '../auth';
+import { apiClient } from '../api';
 import type { TagDetail } from '../types';
 
 interface TagInputProps {
@@ -24,10 +24,9 @@ export default function TagInput({ value, onChange, placeholder = "Add tags...",
     const tagNames = useMemo(() => tagDetails.map(t => t.name), [tagDetails]);
 
     useEffect(() => {
-        apiFetch('/api/tags')
-            .then(res => res.ok ? res.json() : [])
-            .then((data: any[]) => setAllTags(data.map(d => d.name)))
-            .catch(() => {});
+        apiClient.getTags()
+            .then(data => setAllTags(data.map(d => d.name)))
+            .catch(e => console.error('Failed to load tags:', e));
     }, []);
 
     const filteredSuggestions = useMemo(() => {

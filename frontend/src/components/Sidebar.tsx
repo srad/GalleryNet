@@ -2,7 +2,7 @@ import {useState, useCallback, useRef} from 'react';
 import {Link, useLocation} from 'react-router-dom';
 import {PhotoIcon, SearchIcon, HeartIcon} from './Icons';
 import type {Folder} from '../types';
-import {apiFetch} from '../auth';
+import {apiClient} from '../api';
 import LibraryInfo from './LibraryInfo';
 import ConfirmDialog from './ConfirmDialog';
 import {useTheme} from '../hooks/useTheme';
@@ -48,16 +48,12 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
         if (!name) return;
         setIsCreating(true);
         try {
-            const res = await apiFetch('/api/folders', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name}),
-            });
-            if (res.ok) {
-                setNewFolderName('');
-                onFoldersChanged();
-            }
-        } catch { /* ignore */ }
+            await apiClient.createFolder(name);
+            setNewFolderName('');
+            onFoldersChanged();
+        } catch (e) {
+            console.error('Failed to create folder:', e);
+        }
         setIsCreating(false);
     }, [newFolderName, onFoldersChanged]);
 
@@ -70,9 +66,11 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
     const confirmDeleteFolder = useCallback(async () => {
         if (!folderToDelete) return;
         try {
-            const res = await apiFetch(`/api/folders/${folderToDelete.id}`, {method: 'DELETE'});
-            if (res.ok) onFoldersChanged();
-        } catch { /* ignore */ }
+            await apiClient.deleteFolder(folderToDelete.id);
+            onFoldersChanged();
+        } catch (e) {
+            console.error('Failed to delete folder:', e);
+        }
         setFolderToDelete(null);
     }, [folderToDelete, onFoldersChanged]);
 
@@ -95,13 +93,11 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
             return;
         }
         try {
-            const res = await apiFetch(`/api/folders/${renamingId}`, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name}),
-            });
-            if (res.ok) onFoldersChanged();
-        } catch { /* ignore */ }
+            await apiClient.renameFolder(renamingId, name);
+            onFoldersChanged();
+        } catch (e) {
+            console.error('Failed to rename folder:', e);
+        }
         setRenamingId(null);
     }, [renamingId, renameValue, onFoldersChanged]);
 
@@ -148,7 +144,7 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
         }
     }, []);
 
-    const handleDragLeave = useCallback((_e: React.DragEvent, _index: number) => {
+    const handleDragLeave = useCallback(() => {
         dragCounterRef.current--;
         if (dragCounterRef.current === 0) {
             setDropIndex(null);
@@ -171,16 +167,10 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
             try {
                 const ids = JSON.parse(mediaData);
                 if (Array.isArray(ids) && ids.length > 0) {
-                    const res = await apiFetch(`/api/folders/${folderId}/media`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify(ids),
-                    });
-                    if (res.ok) {
-                        onFoldersChanged();
-                        setDropSuccessId(folderId);
-                        setTimeout(() => setDropSuccessId(null), 2000);
-                    }
+                    await apiClient.addMediaToFolder(folderId, ids);
+                    onFoldersChanged();
+                    setDropSuccessId(folderId);
+                    setTimeout(() => setDropSuccessId(null), 2000);
                 }
             } catch (err) {
                 console.error('Failed to drop media:', err);
@@ -198,13 +188,11 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
         // Send new order to backend
         const folderIds = reordered.map(f => f.id);
         try {
-            await apiFetch('/api/folders/reorder', {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(folderIds),
-            });
+            await apiClient.reorderFolders(folderIds);
             onFoldersChanged();
-        } catch { /* ignore */ }
+        } catch (e) {
+            console.error('Failed to reorder folders:', e);
+        }
     }, [dragIndex, folders, onFoldersChanged]);
 
 
@@ -293,7 +281,7 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
                             onDragEnd={handleDragEnd}
                             onDragEnter={(e) => handleDragEnter(e, index, folder.id)}
                             onDragOver={handleDragOver}
-                            onDragLeave={(e) => handleDragLeave(e, index)}
+                            onDragLeave={handleDragLeave}
                             onDrop={(e) => handleDrop(e, index, folder.id)}
                             className={`relative transition-all duration-200 ${
                                 mediaDropTargetId === folder.id

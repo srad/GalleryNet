@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MediaItem } from '../types';
-import { apiFetch } from '../auth';
+import { apiClient } from '../api';
 import { fireMediaUpdate } from '../events';
 
 import { HeartIcon, TagIcon, SearchIcon } from './Icons';
@@ -50,18 +50,23 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
     const [detail, setDetail] = useState<MediaItem | null>(null);
     const [exifOpen, setExifOpen] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [prevId, setPrevId] = useState(item.id);
+
+    // Reset state when item changes (derived state pattern)
+    if (item.id !== prevId) {
+        setPrevId(item.id);
+        setDetail(null);
+        setExifOpen(false);
+    }
 
     // Fetch full details (including exif_json) when item changes
     useEffect(() => {
-        setDetail(null);
-        setExifOpen(false);
         if (!item.id) return;
 
         let cancelled = false;
-        apiFetch(`/api/media/${item.id}`)
-            .then(res => res.ok ? res.json() : null)
+        apiClient.getMediaItem(item.id)
             .then(data => { if (!cancelled && data) setDetail(data); })
-            .catch(() => {});
+            .catch(e => console.error('Failed to load media details:', e));
         return () => { cancelled = true; };
     }, [item.id]);
 
@@ -136,11 +141,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
         setDetail(prev => prev ? { ...prev, tags: newTagDetails } : { ...item, tags: newTagDetails });
         
         try {
-            await apiFetch(`/api/media/${displayItem.id}/tags`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tags: newTags }),
-            });
+            await apiClient.updateMediaTags(displayItem.id, newTags);
             if (displayItem.id) {
                 fireMediaUpdate(displayItem.id, { tags: newTagDetails });
             }

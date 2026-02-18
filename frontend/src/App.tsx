@@ -6,7 +6,7 @@ import GalleryView from './components/GalleryView';
 import SearchView from './components/SearchView';
 import LoginView from './components/LoginView';
 import LoadingIndicator from './components/LoadingIndicator';
-import { apiFetch } from './auth';
+import { apiClient } from './api';
 import { useWebSocket } from './useWebSocket';
 
 
@@ -36,33 +36,27 @@ export default function App() {
     });
     const [refreshKey, setRefreshKey] = useState(0);
     const [isBusy, setIsBusy] = useState(false);
-
-    // Initial load: Check auth and fetch folders
-
+    const [isFixingThumbnails, setIsFixingThumbnails] = useState(false);
 
     // Initial load: Check auth and fetch folders
     useEffect(() => {
         const init = async () => {
             setIsInitialLoading(true);
             try {
-                const res = await fetch('/api/auth-check');
-                if (res.ok) {
-                    const data = await res.json();
-                    setAuthRequired(data.required ?? false);
-                    if (data.authenticated) {
-                        setAuthState('authenticated');
-                        // Fetch folders immediately
-                        const fRes = await apiFetch('/api/folders');
-                        if (fRes.ok) setFolders(await fRes.json());
-                    } else {
-                        setAuthState('unauthenticated');
-                    }
+                const data = await apiClient.checkAuth();
+                setAuthRequired(data.required ?? false);
+                if (data.authenticated) {
+                    setAuthState('authenticated');
+                    // Fetch folders immediately
+                    const foldersData = await apiClient.getFolders();
+                    setFolders(foldersData);
                 } else {
-                    setAuthRequired(true);
                     setAuthState('unauthenticated');
                 }
             } catch (e) {
                 console.error('Init failed', e);
+                // If auth check fails, assume we need to authenticate (or backend is down)
+                setAuthRequired(true);
                 setAuthState('unauthenticated');
             } finally {
                 setIsInitialLoading(false);
@@ -75,9 +69,11 @@ export default function App() {
     // Re-fetch folders when refreshKey changes (uploads may affect counts)
     const fetchFolders = useCallback(async () => {
         try {
-            const res = await apiFetch('/api/folders');
-            if (res.ok) setFolders(await res.json());
-        } catch { /* ignore */ }
+            const foldersData = await apiClient.getFolders();
+            setFolders(foldersData);
+        } catch (e) {
+            console.error('Failed to fetch folders:', e);
+        }
     }, []);
 
     useEffect(() => {
@@ -88,16 +84,20 @@ export default function App() {
         setIsInitialLoading(true);
         setAuthState('authenticated');
         try {
-            const fRes = await apiFetch('/api/folders');
-            if (fRes.ok) setFolders(await fRes.json());
-        } catch { /* ignore */ }
+            const foldersData = await apiClient.getFolders();
+            setFolders(foldersData);
+        } catch (e) {
+            console.error('Failed to fetch folders on login:', e);
+        }
         setIsInitialLoading(false);
     }, []);
 
     const handleLogout = useCallback(async () => {
         try {
-            await fetch('/api/logout', { method: 'POST' });
-        } catch { /* ignore */ }
+            await apiClient.logout();
+        } catch (e) {
+            console.error('Logout failed:', e);
+        }
         setAuthState('unauthenticated');
         navigate('/');
     }, [navigate]);
@@ -121,6 +121,9 @@ export default function App() {
             if (authState === 'authenticated') fetchFolders();
         }, [authState, fetchFolders]),
         handleUploadComplete,
+        useCallback((fixing: boolean) => {
+            setIsFixingThumbnails(fixing);
+        }, []),
         authState === 'authenticated'
     );
 
@@ -246,6 +249,15 @@ export default function App() {
                         />
                     )}
                 </main>
+
+                {isFixingThumbnails && (
+                    <div className="absolute bottom-6 right-6 bg-white dark:bg-gray-800 px-4 py-3 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 flex items-center gap-3 z-50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <LoadingIndicator size="sm" />
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                            Fixing thumbnails...
+                        </span>
+                    </div>
+                )}
             </div>
         </div>
     );

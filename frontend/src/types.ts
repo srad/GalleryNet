@@ -4,6 +4,11 @@ export interface TagDetail {
     confidence?: number;
 }
 
+export interface TagCount {
+    name: string;
+    count: number;
+}
+
 export interface MediaItem {
     id?: string;
     filename: string;
@@ -32,4 +37,14 @@ export interface Folder {
 export interface MediaGroup {
     id: number;
     items: MediaItem[];
+}
+
+export interface Stats {
+    version: string;
+    total_files: number;
+    total_images: number;
+    total_videos: number;
+    total_size_bytes: number;
+    disk_free_bytes: number;
+    disk_total_bytes: number;
 }

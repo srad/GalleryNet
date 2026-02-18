@@ -80,7 +80,8 @@
 - **Deep Linking** &mdash; Bookmarkable URLs for folders, favorites, search states, and individual items
 - **Password Protection** &mdash; Optional single-password auth with rate limiting and secure sessions. No complex user
   management, only a simple password.
-- **Responsive UI** &mdash; Infinite-scroll grid, keyboard shortcuts, touch swipe, and full mobile support
+- **Responsive UI** &mdash; Infinite-scroll grid, keyboard shortcuts, touch swipe, and full mobile support. Includes a persistent **thumbnail resizer** (S/M/L) to customize your viewing experience.
+
 - **Real-time Sync** &mdash; WebSocket-powered instant updates across all browser clients; all users can see new uploads, favorite toggles, and folder changes immediately as they happen
 - **Self-Healing** &mdash; Automatically detects and repairs missing thumbnails or metadata in the background
 - **100% Self-Hosted** &mdash; No cloud, no telemetry. Your data stays yours.
@@ -190,7 +191,8 @@ GalleryNet follows **Hexagonal Architecture** with clean separation of concerns:
 ```
 src/
 ├── domain/          # Models & trait ports (zero dependencies)
-├── application/     # Use cases (upload, search, list, delete)
+├── application/     # Use cases (upload, search, list, delete) and background tasks
+
 ├── infrastructure/  # SQLite, ONNX Runtime, perceptual hashing
 ├── presentation/    # Axum HTTP handlers & auth middleware
 └── main.rs          # Wiring & server startup

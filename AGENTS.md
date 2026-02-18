@@ -18,8 +18,10 @@ src/
 │   ├── delete.rs    # DeleteMediaUseCase — single and batch delete (DB + files)
 │   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison (capped at 10k items, 5M edges)
 │   ├── tag_learning.rs # TagLearningUseCase — Linear SVM with class-weighted training (pos_neg_weights), Platt-calibrated probabilities, hard negative mining, outlier filtering
-│   └── maintenance.rs # FixThumbnailsUseCase — Scans for media with missing phash ('no_hash'), re-generates thumbnails, phash, features, and updates DB
+│   ├── maintenance.rs # FixThumbnailsUseCase — Scans for media with missing phash ('no_hash'), re-generates thumbnails, phash, features, and updates DB
+│   └── tasks.rs       # TaskRunner — Background scheduler for internal maintenance and cleanup
 ├── infrastructure/  # Trait implementations (adapters)
+
 │   ├── sqlite_repo/       # SQLite + sqlite-vec (connection pool, split into submodules)
 │   │   ├── mod.rs         # Pool struct, schema init, trait impl delegation, tag helpers
 │   │   ├── media.rs       # CRUD: save, find, delete, list, counts, favorites
@@ -273,7 +275,8 @@ External: `ffmpeg` (video frame extraction).
 - `MediaSummary` (list endpoint) doesn't include `exif_json` — the separate `GET /api/media/{id}` endpoint returns full `MediaItem` with EXIF for the modal
 - **Real-time Synchronization**: WebSocket updates utilize a serialize-once, zero-cloning broadcast architecture. `MediaUpdated` events include full metadata but strip `exif_json` to minimize bandwidth while allowing instant UI rendering of newly favorited or discovered items.
 - **Sorting Resilience**: The gallery uses a centralized sorting engine that re-evaluates item positions whenever new media is created or metadata (date/size) changes, ensuring correct order without reloads.
-- **Self-Healing**: The system automatically triggers `POST /api/media/fix-thumbnails` on startup and daily (via cron/script) to repair any media items that might have failed processing during upload (identified by `phash='no_hash'`).
+- **Self-Healing**: The system utilizes an internal `TaskRunner` to automatically trigger repair tasks 15 seconds after startup and every 24 hours thereafter. It re-generates thumbnails and metadata for any items that failed processing (identified by `phash='no_hash'`).
+
 - Disk space detection is platform-conditional: `GetDiskFreeSpaceExW` on Windows, `libc::statvfs` on Linux/macOS
 
 - App version is read from `Cargo.toml` at compile time via `env!("CARGO_PKG_VERSION")`

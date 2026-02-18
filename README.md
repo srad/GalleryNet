@@ -38,9 +38,24 @@
 
 ---
 
-<p align="center">
-  <img alt="GalleryNet Screenshot" width="900" src="https://github.com/user-attachments/assets/72613ee9-ab24-4d23-94f3-9b13a6fa4836" />
-</p>
+<table>
+  <tr>
+    <td align="center" style="border: none;">
+      <img src="https://github.com/user-attachments/assets/4e55226b-0cf7-4b1e-b94f-9fdf4c0c0922" height="500" />
+    </td>
+    <td align="center" style="border: none;">
+      <img src="https://github.com/user-attachments/assets/dad59a61-2e9c-49a3-8969-4a3ae92b64ee" height="500" />
+    </td>
+  </tr>
+    <tr>
+    <td align="center" style="border: none;">
+      <img height="500" alt="FireShot Capture 004 - GalleryNet - localhost" src="https://github.com/user-attachments/assets/29b22b1c-fb2a-4de6-9d4e-ce2ebb0b6967" />
+    </td>
+    <td align="center" style="border: none;">
+      <img height="500" alt="FireShot Capture 008 - GalleryNet - localhost" src="https://github.com/user-attachments/assets/b327715e-570c-4146-ab10-2c2aedf608f1" />
+    </td>
+  </tr>
+</table>
 
 ---
 

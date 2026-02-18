@@ -10,6 +10,7 @@ export function fireUnauthorized() {
 
 /**
  * Wrapper around fetch() that automatically fires an unauthorized event on 401.
+
  * Use this for all authenticated API calls.
  */
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {

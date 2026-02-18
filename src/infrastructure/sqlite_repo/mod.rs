@@ -16,7 +16,16 @@ pub struct SqliteRepository {
 
 impl SqliteRepository {
     pub fn new(path: &str) -> Result<Self, DomainError> {
+        Self::new_with_conn_path(path)
+    }
+
+    pub fn new_in_memory() -> Result<Self, DomainError> {
+        Self::new_with_conn_path(":memory:")
+    }
+
+    fn new_with_conn_path(path: &str) -> Result<Self, DomainError> {
         println!("Loading sqlite-vec extension...");
+
         // Load sqlite-vec extension
         unsafe {
             rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(

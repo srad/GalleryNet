@@ -483,8 +483,8 @@ impl SqliteRepository {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::TestDb;
+    use super::*;
     use crate::infrastructure::sqlite_repo::load_tags_for_media;
     use uuid::Uuid;
 
@@ -506,30 +506,36 @@ mod tests {
         let media_id = Uuid::new_v4();
 
         insert_test_media(&db.repo, media_id);
-        db.repo.with_conn(|conn| {
-            conn.execute("INSERT INTO tags (name) VALUES ('Nature')", []).unwrap();
-            Ok(())
-        }).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute("INSERT INTO tags (name) VALUES ('Nature')", [])
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
 
         let tag_id = db.repo.get_tag_id_by_name_impl("Nature").unwrap().unwrap();
 
         // Add manual tag
-        db.repo.update_media_tags_impl(media_id, vec!["Nature".to_string()])
+        db.repo
+            .update_media_tags_impl(media_id, vec!["Nature".to_string()])
             .unwrap();
 
         // Attempt to auto-tag
-        db.repo.update_auto_tags_impl(tag_id, &[(media_id, 0.9)], None)
+        db.repo
+            .update_auto_tags_impl(tag_id, &[(media_id, 0.9)], None)
             .unwrap();
 
         // Verify: manual tag should STILL be manual
-        db.repo.with_conn(|conn| {
-            let tags = load_tags_for_media(conn, media_id.as_bytes());
-            assert_eq!(tags.len(), 1);
-            assert_eq!(tags[0].is_auto, false);
-            assert!(tags[0].confidence.is_none());
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let tags = load_tags_for_media(conn, media_id.as_bytes());
+                assert_eq!(tags.len(), 1);
+                assert_eq!(tags[0].is_auto, false);
+                assert!(tags[0].confidence.is_none());
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
@@ -538,35 +544,42 @@ mod tests {
         let media_id = Uuid::new_v4();
 
         insert_test_media(&db.repo, media_id);
-        db.repo.with_conn(|conn| {
-            conn.execute("INSERT INTO tags (name) VALUES ('Dog')", []).unwrap();
-            Ok(())
-        }).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute("INSERT INTO tags (name) VALUES ('Dog')", [])
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
 
         let tag_id = db.repo.get_tag_id_by_name_impl("Dog").unwrap().unwrap();
 
         // 1. Initial auto-tag
-        db.repo.update_auto_tags_impl(tag_id, &[(media_id, 0.6)], None)
+        db.repo
+            .update_auto_tags_impl(tag_id, &[(media_id, 0.6)], None)
             .unwrap();
 
-        db.repo.with_conn(|conn| {
-            let tags = load_tags_for_media(conn, media_id.as_bytes());
-            assert_eq!(tags[0].confidence, Some(0.6));
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let tags = load_tags_for_media(conn, media_id.as_bytes());
+                assert_eq!(tags[0].confidence, Some(0.6));
+                Ok(())
+            })
+            .unwrap();
 
         // 2. Update auto-tag
-        db.repo.update_auto_tags_impl(tag_id, &[(media_id, 0.85)], None)
+        db.repo
+            .update_auto_tags_impl(tag_id, &[(media_id, 0.85)], None)
             .unwrap();
 
-        db.repo.with_conn(|conn| {
-            let tags = load_tags_for_media(conn, media_id.as_bytes());
-            assert_eq!(tags[0].confidence, Some(0.85));
-            assert_eq!(tags[0].is_auto, true);
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let tags = load_tags_for_media(conn, media_id.as_bytes());
+                assert_eq!(tags[0].confidence, Some(0.85));
+                assert_eq!(tags[0].is_auto, true);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
@@ -575,43 +588,52 @@ mod tests {
         let media_id = Uuid::new_v4();
 
         insert_test_media(&db.repo, media_id);
-        db.repo.with_conn(|conn| {
-            conn.execute("INSERT INTO tags (name) VALUES ('TagA')", []).unwrap();
-            conn.execute("INSERT INTO tags (name) VALUES ('TagB')", []).unwrap();
-            Ok(())
-        }).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute("INSERT INTO tags (name) VALUES ('TagA')", [])
+                    .unwrap();
+                conn.execute("INSERT INTO tags (name) VALUES ('TagB')", [])
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
 
         let id_a = db.repo.get_tag_id_by_name_impl("TagA").unwrap().unwrap();
         let id_b = db.repo.get_tag_id_by_name_impl("TagB").unwrap().unwrap();
 
         // 1. Assign both as auto
-        db.repo.update_auto_tags_impl(id_a, &[(media_id, 0.7)], None)
+        db.repo
+            .update_auto_tags_impl(id_a, &[(media_id, 0.7)], None)
             .unwrap();
-        db.repo.update_auto_tags_impl(id_b, &[(media_id, 0.8)], None)
+        db.repo
+            .update_auto_tags_impl(id_b, &[(media_id, 0.8)], None)
             .unwrap();
 
-        db.repo.with_conn(|conn| {
-            let tags = load_tags_for_media(conn, media_id.as_bytes());
-            assert_eq!(tags.len(), 2);
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let tags = load_tags_for_media(conn, media_id.as_bytes());
+                assert_eq!(tags.len(), 2);
+                Ok(())
+            })
+            .unwrap();
 
         // 2. Update ONLY TagA
-        db.repo.update_auto_tags_impl(id_a, &[(media_id, 0.9)], None)
+        db.repo
+            .update_auto_tags_impl(id_a, &[(media_id, 0.9)], None)
             .unwrap();
 
         // 3. Verify: TagB should STILL be there and TagA should be updated
-        db.repo.with_conn(|conn| {
-            let tags = load_tags_for_media(conn, media_id.as_bytes());
-            assert_eq!(tags.len(), 2);
-            let t_a = tags.iter().find(|t| t.name == "TagA").unwrap();
-            let t_b = tags.iter().find(|t| t.name == "TagB").unwrap();
-            assert_eq!(t_a.confidence, Some(0.9));
-            assert_eq!(t_b.confidence, Some(0.8));
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let tags = load_tags_for_media(conn, media_id.as_bytes());
+                assert_eq!(tags.len(), 2);
+                let t_a = tags.iter().find(|t| t.name == "TagA").unwrap();
+                let t_b = tags.iter().find(|t| t.name == "TagB").unwrap();
+                assert_eq!(t_a.confidence, Some(0.9));
+                assert_eq!(t_b.confidence, Some(0.8));
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
@@ -662,19 +684,21 @@ mod tests {
         }).unwrap();
 
         // Batch apply two tags
-        db.repo.update_media_tags_batch_impl(&ids, &["Batch1".to_string(), "Batch2".to_string()])
+        db.repo
+            .update_media_tags_batch_impl(&ids, &["Batch1".to_string(), "Batch2".to_string()])
             .unwrap();
 
-        db.repo.with_conn(|conn| {
-            for id in ids {
-                let tags = load_tags_for_media(conn, id.as_bytes());
-                assert_eq!(tags.len(), 2);
-                assert!(tags.iter().any(|t| t.name == "Batch1"));
-                assert!(tags.iter().any(|t| t.name == "Batch2"));
-            }
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                for id in ids {
+                    let tags = load_tags_for_media(conn, id.as_bytes());
+                    assert_eq!(tags.len(), 2);
+                    assert!(tags.iter().any(|t| t.name == "Batch1"));
+                    assert!(tags.iter().any(|t| t.name == "Batch2"));
+                }
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
@@ -684,7 +708,8 @@ mod tests {
 
         insert_test_media(&db.repo, media_id);
 
-        db.repo.update_media_tags_impl(media_id, vec!["CountMe".to_string()])
+        db.repo
+            .update_media_tags_impl(media_id, vec!["CountMe".to_string()])
             .unwrap();
 
         let counts = db.repo.get_tags_with_manual_counts_impl().unwrap();
@@ -703,31 +728,34 @@ mod tests {
     fn test_model_persistence() {
         let db = TestDb::new("test_model");
 
-        db.repo.with_conn(|conn| {
-            conn.execute("INSERT INTO tags (id, name) VALUES (1, 'ModelTag')", [])
-                .unwrap();
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute("INSERT INTO tags (id, name) VALUES (1, 'ModelTag')", [])
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
 
         let weights = vec![0.1, -0.2, 0.5, 1.5];
         let bias = 0.75;
 
-        db.repo.save_tag_model_impl(1, &weights, bias, -2.0, 0.0, 0)
+        db.repo
+            .save_tag_model_impl(1, &weights, bias, -2.0, 0.0, 0)
             .unwrap();
 
-        db.repo.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT weights, bias FROM tag_models WHERE tag_id = 1")
-                .unwrap();
-            let (weights_bytes, loaded_bias): (Vec<u8>, f64) =
-                stmt.query_row([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let mut stmt = conn
+                    .prepare("SELECT weights, bias FROM tag_models WHERE tag_id = 1")
+                    .unwrap();
+                let (weights_bytes, loaded_bias): (Vec<u8>, f64) =
+                    stmt.query_row([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
 
-            assert_eq!(loaded_bias, bias);
-            assert_eq!(weights_bytes.len(), weights.len() * 8);
-            Ok(())
-        })
-        .unwrap();
+                assert_eq!(loaded_bias, bias);
+                assert_eq!(weights_bytes.len(), weights.len() * 8);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
@@ -737,31 +765,34 @@ mod tests {
 
         insert_test_media(&db.repo, media_id);
 
-        db.repo.update_media_tags_impl(media_id, vec!["DeleteMe".to_string()])
+        db.repo
+            .update_media_tags_impl(media_id, vec!["DeleteMe".to_string()])
             .unwrap();
 
         // 1. Verify association exists
-        db.repo.with_conn(|conn| {
-            let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM media_tags", [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(count, 1);
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let count: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM media_tags", [], |r| r.get(0))
+                    .unwrap();
+                assert_eq!(count, 1);
+                Ok(())
+            })
+            .unwrap();
 
         // 2. Delete media item
         db.repo.delete_many_impl(&[media_id]).unwrap();
 
         // 3. Verify association is GONE (via CASCADE)
-        db.repo.with_conn(|conn| {
-            let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM media_tags", [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(count, 0);
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let count: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM media_tags", [], |r| r.get(0))
+                    .unwrap();
+                assert_eq!(count, 0);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
@@ -769,9 +800,11 @@ mod tests {
         let db = TestDb::new("test_empty");
 
         // Should not crash or error on empty batch
-        db.repo.update_media_tags_batch_impl(&[], &["Tag".to_string()])
+        db.repo
+            .update_media_tags_batch_impl(&[], &["Tag".to_string()])
             .unwrap();
-        db.repo.update_media_tags_batch_impl(&[Uuid::new_v4()], &[])
+        db.repo
+            .update_media_tags_batch_impl(&[Uuid::new_v4()], &[])
             .unwrap();
 
         // Auto-tag with empty matches
@@ -783,17 +816,20 @@ mod tests {
         let db = TestDb::new("test_invalid");
         let fake_id = Uuid::new_v4();
 
-        db.repo.with_conn(|conn| {
-            conn.execute("INSERT INTO tags (name) VALUES ('Nature')", [])
-                .unwrap();
-            Ok(())
-        })
-        .unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute("INSERT INTO tags (name) VALUES ('Nature')", [])
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
         let tag_id = db.repo.get_tag_id_by_name_impl("Nature").unwrap().unwrap();
 
         // Attempt to auto-tag an ID that doesn't exist in 'media' table
         // This should fail due to FOREIGN KEY constraint
-        let res = db.repo.update_auto_tags_impl(tag_id, &[(fake_id, 0.9)], None);
+        let res = db
+            .repo
+            .update_auto_tags_impl(tag_id, &[(fake_id, 0.9)], None);
         assert!(
             res.is_err(),
             "Should have failed due to foreign key constraint"
@@ -806,15 +842,19 @@ mod tests {
         let media_id = Uuid::new_v4();
 
         insert_test_media(&db.repo, media_id);
-        db.repo.with_conn(|conn| {
-            conn.execute("INSERT INTO tags (name) VALUES ('Stale')", []).unwrap();
-            Ok(())
-        }).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute("INSERT INTO tags (name) VALUES ('Stale')", [])
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
 
         let tag_id = db.repo.get_tag_id_by_name_impl("Stale").unwrap().unwrap();
 
         // 1. Setup: Item has an auto-tag
-        db.repo.update_auto_tags_impl(tag_id, &[(media_id, 0.7)], None)
+        db.repo
+            .update_auto_tags_impl(tag_id, &[(media_id, 0.7)], None)
             .unwrap();
 
         // 2. Verify it exists
@@ -856,7 +896,8 @@ mod tests {
         assert_eq!(db.repo.count_auto_tags_impl(None).unwrap(), 0);
 
         // 5. Add auto-tag
-        db.repo.update_auto_tags_impl(1, &[(media_id, 0.9)], None)
+        db.repo
+            .update_auto_tags_impl(1, &[(media_id, 0.9)], None)
             .unwrap();
 
         // 6. Verify counts
@@ -873,15 +914,16 @@ mod tests {
 
         // 7. Verify count for DIFFERENT folder is 0
         let other_folder = Uuid::new_v4();
-        db.repo.with_conn(|conn| {
-            conn.execute(
-                "INSERT INTO folders (id, name, created_at) VALUES (?1, 'Other', '2024-01-01')",
-                params![other_folder.as_bytes()],
-            )
+        db.repo
+            .with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO folders (id, name, created_at) VALUES (?1, 'Other', '2024-01-01')",
+                    params![other_folder.as_bytes()],
+                )
+                .unwrap();
+                Ok(())
+            })
             .unwrap();
-            Ok(())
-        })
-        .unwrap();
         assert_eq!(
             db.repo.count_auto_tags_impl(Some(other_folder)).unwrap(),
             0,

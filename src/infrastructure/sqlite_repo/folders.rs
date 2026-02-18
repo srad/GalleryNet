@@ -562,7 +562,9 @@ mod tests {
         db.repo.create_folder_impl(id3, "Third").unwrap();
 
         // Reverse the order
-        db.repo.reorder_folders_impl(&[(id3, 0), (id2, 1), (id1, 2)]).unwrap();
+        db.repo
+            .reorder_folders_impl(&[(id3, 0), (id2, 1), (id1, 2)])
+            .unwrap();
 
         let folders = db.repo.list_folders_impl().unwrap();
         assert_eq!(folders[0].id, id3);
@@ -586,7 +588,10 @@ mod tests {
         insert_media(&db, id3, "2024-03-01T00:00:00Z", 300, "image");
 
         // Add 3 items
-        let added = db.repo.add_media_to_folder_impl(folder_id, &[id1, id2, id3]).unwrap();
+        let added = db
+            .repo
+            .add_media_to_folder_impl(folder_id, &[id1, id2, id3])
+            .unwrap();
         assert_eq!(added, 3);
 
         // Verify folder item count
@@ -594,14 +599,23 @@ mod tests {
         assert_eq!(folder.item_count, 3);
 
         // Verify listing
-        let items = db.repo.find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date").unwrap();
+        let items = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(items.len(), 3);
 
         // Remove 1
-        let removed = db.repo.remove_media_from_folder_impl(folder_id, &[id2]).unwrap();
+        let removed = db
+            .repo
+            .remove_media_from_folder_impl(folder_id, &[id2])
+            .unwrap();
         assert_eq!(removed, 1);
 
-        let items = db.repo.find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date").unwrap();
+        let items = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(items.len(), 2);
         assert!(!items.iter().any(|m| m.id == id2));
     }
@@ -624,7 +638,10 @@ mod tests {
         assert_eq!(added, 0);
 
         // Still only 1 item
-        let items = db.repo.find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date").unwrap();
+        let items = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(items.len(), 1);
     }
 
@@ -646,15 +663,19 @@ mod tests {
         assert!(found.is_some());
 
         // folder_media rows should be gone
-        db.repo.with_conn(|conn| {
-            let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM folder_media WHERE folder_id = ?1",
-                params![folder_id.as_bytes()],
-                |r| r.get(0),
-            ).unwrap();
-            assert_eq!(count, 0);
-            Ok(())
-        }).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                let count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM folder_media WHERE folder_id = ?1",
+                        params![folder_id.as_bytes()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(count, 0);
+                Ok(())
+            })
+            .unwrap();
     }
 
     // ==================== Folder filtering ====================
@@ -669,13 +690,21 @@ mod tests {
         db.repo.create_folder_impl(folder_id, "Mixed").unwrap();
         insert_media(&db, img, "2024-01-01T00:00:00Z", 100, "image");
         insert_media(&db, vid, "2024-02-01T00:00:00Z", 200, "video");
-        db.repo.add_media_to_folder_impl(folder_id, &[img, vid]).unwrap();
+        db.repo
+            .add_media_to_folder_impl(folder_id, &[img, vid])
+            .unwrap();
 
-        let images = db.repo.find_all_in_folder_impl(folder_id, 10, 0, Some("image"), false, None, false, "date").unwrap();
+        let images = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 10, 0, Some("image"), false, None, false, "date")
+            .unwrap();
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].id, img);
 
-        let videos = db.repo.find_all_in_folder_impl(folder_id, 10, 0, Some("video"), false, None, false, "date").unwrap();
+        let videos = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 10, 0, Some("video"), false, None, false, "date")
+            .unwrap();
         assert_eq!(videos.len(), 1);
         assert_eq!(videos[0].id, vid);
     }
@@ -690,10 +719,15 @@ mod tests {
         db.repo.create_folder_impl(folder_id, "Favs").unwrap();
         insert_media(&db, id1, "2024-01-01T00:00:00Z", 100, "image");
         insert_media(&db, id2, "2024-02-01T00:00:00Z", 200, "image");
-        db.repo.add_media_to_folder_impl(folder_id, &[id1, id2]).unwrap();
+        db.repo
+            .add_media_to_folder_impl(folder_id, &[id1, id2])
+            .unwrap();
         db.repo.set_favorite_impl(id1, true).unwrap();
 
-        let favs = db.repo.find_all_in_folder_impl(folder_id, 10, 0, None, true, None, false, "date").unwrap();
+        let favs = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 10, 0, None, true, None, false, "date")
+            .unwrap();
         assert_eq!(favs.len(), 1);
         assert_eq!(favs[0].id, id1);
     }
@@ -708,13 +742,26 @@ mod tests {
         db.repo.create_folder_impl(folder_id, "Tagged").unwrap();
         insert_media(&db, id1, "2024-01-01T00:00:00Z", 100, "image");
         insert_media(&db, id2, "2024-02-01T00:00:00Z", 200, "image");
-        db.repo.add_media_to_folder_impl(folder_id, &[id1, id2]).unwrap();
-        db.repo.update_media_tags_impl(id1, vec!["Landscape".to_string()]).unwrap();
+        db.repo
+            .add_media_to_folder_impl(folder_id, &[id1, id2])
+            .unwrap();
+        db.repo
+            .update_media_tags_impl(id1, vec!["Landscape".to_string()])
+            .unwrap();
 
-        let tagged = db.repo.find_all_in_folder_impl(
-            folder_id, 10, 0, None, false,
-            Some(vec!["Landscape".to_string()]), false, "date",
-        ).unwrap();
+        let tagged = db
+            .repo
+            .find_all_in_folder_impl(
+                folder_id,
+                10,
+                0,
+                None,
+                false,
+                Some(vec!["Landscape".to_string()]),
+                false,
+                "date",
+            )
+            .unwrap();
         assert_eq!(tagged.len(), 1);
         assert_eq!(tagged[0].id, id1);
     }
@@ -727,16 +774,28 @@ mod tests {
 
         let ids: Vec<Uuid> = (0..7).map(|_| Uuid::new_v4()).collect();
         for (i, id) in ids.iter().enumerate() {
-            insert_media(&db, *id, &format!("2024-{:02}-01T00:00:00Z", i + 1), 100, "image");
+            insert_media(
+                &db,
+                *id,
+                &format!("2024-{:02}-01T00:00:00Z", i + 1),
+                100,
+                "image",
+            );
         }
         db.repo.add_media_to_folder_impl(folder_id, &ids).unwrap();
 
         // Page 1
-        let p1 = db.repo.find_all_in_folder_impl(folder_id, 3, 0, None, false, None, false, "date").unwrap();
+        let p1 = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 3, 0, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(p1.len(), 3);
 
         // Page 2
-        let p2 = db.repo.find_all_in_folder_impl(folder_id, 3, 3, None, false, None, false, "date").unwrap();
+        let p2 = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 3, 3, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(p2.len(), 3);
 
         // No overlap
@@ -746,7 +805,10 @@ mod tests {
         }
 
         // Page 3 — only 1 left
-        let p3 = db.repo.find_all_in_folder_impl(folder_id, 3, 6, None, false, None, false, "date").unwrap();
+        let p3 = db
+            .repo
+            .find_all_in_folder_impl(folder_id, 3, 6, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(p3.len(), 1);
     }
 
@@ -760,7 +822,9 @@ mod tests {
         db.repo.create_folder_impl(folder_id, "Download").unwrap();
         insert_media(&db, id1, "2024-01-01T00:00:00Z", 1000, "image");
         insert_media(&db, id2, "2024-02-01T00:00:00Z", 2000, "video");
-        db.repo.add_media_to_folder_impl(folder_id, &[id1, id2]).unwrap();
+        db.repo
+            .add_media_to_folder_impl(folder_id, &[id1, id2])
+            .unwrap();
 
         let files = db.repo.get_folder_media_files_impl(folder_id).unwrap();
         assert_eq!(files.len(), 2);

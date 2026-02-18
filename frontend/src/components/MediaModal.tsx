@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MediaItem } from '../types';
 import { apiFetch } from '../auth';
+import { fireMediaUpdate } from '../events';
+
 import { HeartIcon, TagIcon, SearchIcon } from './Icons';
 import TagInput from './TagInput';
 import ConfirmDialog from './ConfirmDialog';
@@ -38,7 +40,8 @@ function formatDate(dateStr: string): string {
     return d.toLocaleString();
 }
 
-export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimilar, onToggleFavorite, onDelete, onTagsChanged }: MediaModalProps) {
+export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimilar, onToggleFavorite, onDelete }: MediaModalProps) {
+
 
     const backdropRef = useRef<HTMLDivElement>(null);
     const video = isVideo(item.filename);
@@ -138,11 +141,14 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tags: newTags }),
             });
-            onTagsChanged?.();
+            if (displayItem.id) {
+                fireMediaUpdate(displayItem.id, { tags: newTagDetails });
+            }
         } catch (e) {
             console.error('Failed to update tags', e);
         }
-    }, [displayItem.id, item, onTagsChanged]);
+    }, [displayItem.id, item]);
+
 
     return (
         <div

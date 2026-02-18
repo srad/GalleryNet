@@ -30,13 +30,10 @@ src/
 ├── presentation/    # HTTP layer
 │   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, batch-download (streaming), stats, login/logout, folders. Rate limiting, filename sanitization, error message sanitization, part-based zip splitting.
 │   └── auth.rs      # Authentication middleware, AuthConfig, HMAC token generation/verification, constant-time password comparison, session generation counter for invalidation
-
-└── main.rs          # Wiring, config, server startup
-
-frontend/src/
-├── App.tsx              # Root component — Route-based view switching, global auth/init guard, sidebar state
-├── auth.ts              # Auth utilities: apiFetch (401-intercepting fetch wrapper), fireUnauthorized event dispatcher
+├── events.ts            # Application-wide selective media update bus (zero-latency local sync)
+├── useWebSocket.ts      # WebSocket connection manager — heartbeat, reconnection jitter, lag recovery
 ├── types.ts             # Shared types: MediaItem, MediaFilter, UploadProgress, Folder
+
 └── components/
     ├── Icons.tsx        # Inline SVG icons (PhotoIcon, UploadIcon, SearchIcon, TagIcon)
     ├── LoadingIndicator.tsx # Standardized spinner component (inline, centered, and overlay variants)
@@ -171,8 +168,10 @@ Auto-migration: on startup, if the `media_type` column is missing (pre-existing 
 ### Concurrency
 - **SQLite**: Condvar-based connection pool (4 connections), WAL mode enabled, 5s busy timeout
 - **ONNX Runtime**: Condvar-based session pool (10 sessions). Image preprocessing (load, crop, resize, normalize) happens *before* acquiring a session to minimize lock hold time. `Session::run()` requires `&mut self` in ort 2.0.0-rc.11, so pooling is necessary for concurrent inference.
+- **WebSocket Broadcast**: Serialize-once, zero-cloning architecture. Messages are serialized to JSON once and shared via `Arc<str>` across all connected clients to minimize CPU and memory overhead.
 
 ## Build & Run
+
 
 ### Runtime Dependencies
 - **ffmpeg** must be on PATH for video frame extraction (phash, thumbnails, features)
@@ -202,7 +201,9 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 
 - `POST /api/login` — JSON body `{"password":"..."}`. Returns 200 with `Set-Cookie: gallery_session=<token>` (HttpOnly, Secure, SameSite=Strict) on success, 401 on wrong password, 429 after 10 attempts per 5-minute window per IP. Constant-time password comparison. No-op (always 200) if auth not configured.
 - `POST /api/logout` — Clears the session cookie and invalidates all existing sessions (bumps generation counter). Always returns 200.
+- `GET /api/ws` — WebSocket endpoint for real-time library updates. Requires authentication. Handles heartbeats (30s), lag detection, and selective metadata pushing (stripped of EXIF).
 - `GET /api/auth-check` — Returns `{"authenticated": true/false, "required": true/false}`. Used by frontend on load to decide whether to show login screen.
+
 - `POST /api/upload` — Multipart file upload (single or multiple files, max 1000 per request). Only allowed extensions (jpg, jpeg, png, gif, webp, bmp, tiff, tif, heic, heif, avif, mp4, mov, avi, mkv, webm). Single file returns `MediaItem` JSON. Multiple files returns array of `{media, error, filename}` results. Streams to temp file to avoid memory buffering. Image decode limits (10k×10k px, 400MB alloc) prevent pixel bombs. HTTP 409 for duplicates.
 - `POST /api/search` — Multipart with `file` (image) and `similarity` (0-100). Returns array of `MediaItem`.
 - `POST /api/media/group` — Group media by similarity. JSON body `{"folder_id": "...", "similarity": 80}`. Returns array of `MediaGroup` (groups of items).
@@ -268,7 +269,10 @@ External: `ffmpeg` (video frame extraction).
 - `SUM(CASE ...)` in SQLite returns `NULL` on empty tables — wrapped in `COALESCE(..., 0)` in `media_counts` query
 - `filename` is used as a stable identifier (React key, modal selection tracking) to avoid index-shift bugs during uploads
 - `MediaSummary` (list endpoint) doesn't include `exif_json` — the separate `GET /api/media/{id}` endpoint returns full `MediaItem` with EXIF for the modal
+- **Real-time Synchronization**: WebSocket updates utilize a serialize-once, zero-cloning broadcast architecture. `MediaUpdated` events include full metadata but strip `exif_json` to minimize bandwidth while allowing instant UI rendering of newly favorited or discovered items.
+- **Sorting Resilience**: The gallery uses a centralized sorting engine that re-evaluates item positions whenever new media is created or metadata (date/size) changes, ensuring correct order without reloads.
 - Disk space detection is platform-conditional: `GetDiskFreeSpaceExW` on Windows, `libc::statvfs` on Linux/macOS
+
 - App version is read from `Cargo.toml` at compile time via `env!("CARGO_PKG_VERSION")`
 - The ONNX model must be re-exported if changing the feature extraction architecture (see `scripts/mobilenetv3_export.py`, requires Python with `torch`, `timm`, `onnx`)
 - **Dialogs**: Always use `ConfirmDialog.tsx` for confirmations (delete, destructive actions) and `AlertDialog.tsx` for alerts/notifications. Avoid using the native `window.alert` or `window.confirm`.

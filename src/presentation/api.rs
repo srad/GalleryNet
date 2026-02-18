@@ -1,11 +1,14 @@
 use axum::{
     body::Body,
-    extract::{ConnectInfo, Multipart, State, Query, Path},
+    extract::{ConnectInfo, Multipart, State, Query, Path, ws::{WebSocket, WebSocketUpgrade, Message}},
     http::{StatusCode, header, HeaderMap},
     response::{Json, IntoResponse},
     routing::{get, post, put},
     Router,
 };
+use tokio::sync::broadcast;
+use std::time::{Instant, Duration};
+
 use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{ZipEntryBuilder, Compression};
 use tokio_util::compat::{TokioAsyncWriteCompatExt, FuturesAsyncWriteCompatExt};
@@ -15,11 +18,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::{Mutex, Semaphore};
 use std::path::PathBuf;
 use tokio_util::io::ReaderStream;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use uuid::Uuid;
 use tokio::io::AsyncWriteExt;
@@ -61,6 +63,25 @@ pub struct DownloadPlan {
     pub expires_at: Instant,
 }
 
+#[derive(Clone, Serialize, Debug)]
+#[serde(tag = "type", content = "data")]
+pub enum WsMessage {
+    MediaCreated { item: serde_json::Value },
+    MediaUpdated { id: Uuid, item: serde_json::Value },
+    MediaDeleted { id: Uuid },
+    MediaBatchDeleted { ids: Vec<Uuid> },
+    MediaTagsUpdated { ids: Vec<Uuid>, tags: Vec<String> },
+    FolderCreated { folder: serde_json::Value },
+    FolderDeleted { id: Uuid },
+    FolderRenamed { id: Uuid, name: String },
+    FoldersReordered { ids: Vec<Uuid> },
+    MediaAddedToFolder { folder_id: Uuid, media_ids: Vec<Uuid> },
+    MediaRemovedFromFolder { folder_id: Uuid, media_ids: Vec<Uuid> },
+    UploadComplete,
+    TagLearningComplete { tag_name: String },
+    FullRefresh,
+}
+
 // App State
 #[derive(Clone)]
 pub struct AppState {
@@ -76,6 +97,71 @@ pub struct AppState {
     pub upload_semaphore: Arc<Semaphore>,
     pub login_rate_limiter: Arc<Mutex<HashMap<IpAddr, (u32, Instant)>>>,
     pub download_plans: Arc<Mutex<HashMap<String, DownloadPlan>>>,
+    pub tx: broadcast::Sender<Arc<str>>,
+}
+
+impl AppState {
+    pub fn broadcast(&self, msg: WsMessage) {
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = self.tx.send(Arc::from(json));
+        }
+    }
+}
+
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    let mut rx = state.tx.subscribe();
+    let mut heartbeat_interval = tokio::time::interval(Duration::from_secs(30));
+    
+    let mut last_pong = Instant::now();
+    let timeout_duration = Duration::from_secs(60);
+
+    loop {
+        tokio::select! {
+            res = rx.recv() => {
+                match res {
+                    Ok(json) => {
+                        if socket.send(Message::Text(json.to_string().into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("WebSocket client lagged by {} messages. Forcing refresh.", n);
+                        let msg = WsMessage::FullRefresh;
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            let _ = socket.send(Message::Text(json.into())).await;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            _ = heartbeat_interval.tick() => {
+                if Instant::now().duration_since(last_pong) > timeout_duration {
+                    warn!("WebSocket client timed out (no pong). Closing connection.");
+                    break;
+                }
+                if socket.send(Message::Ping(vec![].into())).await.is_err() {
+                    break;
+                }
+            }
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    Some(Ok(Message::Pong(_))) => {
+                        last_pong = Instant::now();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
 }
 
 
@@ -183,6 +269,7 @@ pub fn app_router(state: AppState) -> Router {
 
     // Protected API routes
     let protected_routes = Router::new()
+        .route("/ws", get(ws_handler))
         .route("/upload", post(upload_handler))
         .route("/search", post(search_handler))
         .route("/media", get(list_handler))
@@ -478,12 +565,14 @@ async fn upload_handler(
         return Err(DomainError::Io("No file uploaded".to_string()));
     }
 
-    // Single file — return the MediaItem directly for backward compatibility
     if pending.len() == 1 {
         let (filename, temp_path) = pending.into_iter().next().unwrap();
         let data = tokio::fs::read(&temp_path).await.map_err(|e| DomainError::Io(e.to_string()))?;
         let _ = tokio::fs::remove_file(&temp_path).await;
         let media = state.upload_use_case.execute(filename, &data).await?;
+        state.broadcast(WsMessage::MediaCreated { 
+            item: serde_json::to_value(&media).unwrap() 
+        });
         return Ok((StatusCode::CREATED, Json(serde_json::to_value(media).unwrap())));
     }
 
@@ -491,10 +580,10 @@ async fn upload_handler(
     let mut handles = Vec::with_capacity(pending.len());
     for (filename, temp_path) in pending {
         let use_case = state.upload_use_case.clone();
-        let semaphore = state.upload_semaphore.clone(); // Clone semaphore for the task
+        let semaphore = state.upload_semaphore.clone(); 
+        let app_state = state.clone();
 
         handles.push(tokio::spawn(async move {
-            // Acquire permit before heavy processing (reading file + image decode + ONNX)
             let _permit = semaphore.acquire().await.unwrap();
 
             let data = tokio::fs::read(&temp_path).await;
@@ -508,7 +597,12 @@ async fn upload_handler(
                 },
             };
             match use_case.execute(filename.clone(), &data).await {
-                Ok(media) => UploadResult { media: Some(media), error: None, filename },
+                Ok(media) => {
+                    app_state.broadcast(WsMessage::MediaCreated { 
+                        item: serde_json::to_value(&media).unwrap() 
+                    });
+                    UploadResult { media: Some(media), error: None, filename }
+                },
                 Err(e) => UploadResult { media: None, error: Some(e.to_string()), filename },
             }
         }));
@@ -526,6 +620,7 @@ async fn upload_handler(
         }
     }
 
+    state.broadcast(WsMessage::UploadComplete);
     Ok((StatusCode::CREATED, Json(serde_json::to_value(results).unwrap())))
 }
 
@@ -599,6 +694,7 @@ async fn delete_handler(
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, DomainError> {
     state.delete_use_case.execute(id).await?;
+    state.broadcast(WsMessage::MediaDeleted { id });
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -613,6 +709,10 @@ async fn toggle_favorite_handler(
     Json(body): Json<FavoriteRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
     state.repo.set_favorite(id, body.favorite)?;
+    if let Some(mut item) = state.repo.find_by_id(id)? {
+        item.exif_json = None;
+        state.broadcast(WsMessage::MediaUpdated { id, item: serde_json::to_value(item).unwrap() });
+    }
     Ok(StatusCode::OK)
 }
 
@@ -657,6 +757,7 @@ async fn learn_tag_handler(
     let count = tokio::task::spawn_blocking(move || use_case.learn_tag(&tag_name))
         .await
         .map_err(|e| DomainError::Ai(e.to_string()))??;
+    state.broadcast(WsMessage::TagLearningComplete { tag_name: body.tag_name });
     Ok(Json(json!({ "auto_tagged_count": count })))
 }
 
@@ -675,6 +776,7 @@ async fn auto_tag_handler(
     let result = tokio::task::spawn_blocking(move || use_case.run_auto_tagging(folder_id))
         .await
         .map_err(|e| DomainError::Ai(e.to_string()))??;
+    state.broadcast(WsMessage::UploadComplete);
     Ok(Json(json!({
         "before": result.before,
         "after": result.after,
@@ -697,6 +799,9 @@ async fn apply_tag_handler(
     let count = tokio::task::spawn_blocking(move || use_case.apply_tag_model(id, folder_id))
         .await
         .map_err(|e| DomainError::Ai(e.to_string()))??;
+    if let Ok(Some(name)) = state.repo.get_tag_name_by_id(id) {
+        state.broadcast(WsMessage::TagLearningComplete { tag_name: name });
+    }
     Ok(Json(json!({ "auto_tagged_count": count })))
 }
 
@@ -710,7 +815,11 @@ async fn update_tags_handler(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateTagsRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
-    state.repo.update_media_tags(id, body.tags)?;
+    state.repo.update_media_tags(id, body.tags.clone())?;
+    if let Some(mut item) = state.repo.find_by_id(id)? {
+        item.exif_json = None;
+        state.broadcast(WsMessage::MediaUpdated { id, item: serde_json::to_value(item).unwrap() });
+    }
     Ok(StatusCode::OK)
 }
 
@@ -725,6 +834,7 @@ async fn batch_update_tags_handler(
     Json(body): Json<BatchUpdateTagsRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
     state.repo.update_media_tags_batch(&body.ids, &body.tags)?;
+    state.broadcast(WsMessage::MediaTagsUpdated { ids: body.ids, tags: body.tags });
     Ok(StatusCode::OK)
 }
 
@@ -917,6 +1027,7 @@ async fn batch_delete_handler(
     Json(ids): Json<Vec<Uuid>>,
 ) -> Result<impl IntoResponse, DomainError> {
     let deleted = state.delete_use_case.execute_batch(&ids).await?;
+    state.broadcast(WsMessage::MediaBatchDeleted { ids });
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -1169,6 +1280,9 @@ async fn create_folder_handler(
     }
     let id = Uuid::new_v4();
     let folder = state.repo.create_folder(id, name)?;
+    state.broadcast(WsMessage::FolderCreated { 
+        folder: serde_json::to_value(&folder).unwrap() 
+    });
     Ok((StatusCode::CREATED, Json(folder)))
 }
 
@@ -1184,6 +1298,7 @@ async fn delete_folder_handler(
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, DomainError> {
     state.repo.delete_folder(id)?;
+    state.broadcast(WsMessage::FolderDeleted { id });
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1197,6 +1312,7 @@ async fn rename_folder_handler(
         return Err(DomainError::Io("Folder name cannot be empty".to_string()));
     }
     state.repo.rename_folder(id, name)?;
+    state.broadcast(WsMessage::FolderRenamed { id, name: name.to_string() });
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1205,12 +1321,13 @@ async fn reorder_folders_handler(
     State(state): State<AppState>,
     Json(folder_ids): Json<Vec<Uuid>>,
 ) -> Result<impl IntoResponse, DomainError> {
-    let order: Vec<(Uuid, i64)> = folder_ids
+    let order: Vec<(Uuid, i64)> = folder_ids.clone()
         .into_iter()
         .enumerate()
         .map(|(i, id)| (id, i as i64))
         .collect();
     state.repo.reorder_folders(&order)?;
+    state.broadcast(WsMessage::FoldersReordered { ids: folder_ids });
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1252,6 +1369,7 @@ async fn add_to_folder_handler(
     Json(media_ids): Json<Vec<Uuid>>,
 ) -> Result<impl IntoResponse, DomainError> {
     let added = state.repo.add_media_to_folder(folder_id, &media_ids)?;
+    state.broadcast(WsMessage::MediaAddedToFolder { folder_id, media_ids });
     Ok(Json(json!({ "added": added })))
 }
 
@@ -1266,6 +1384,7 @@ async fn remove_from_folder_handler(
     Json(body): Json<RemoveFromFolderRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
     let removed = state.repo.remove_media_from_folder(folder_id, &body.media_ids)?;
+    state.broadcast(WsMessage::MediaRemovedFromFolder { folder_id, media_ids: body.media_ids });
     Ok(Json(json!({ "removed": removed })))
 }
 
@@ -1389,5 +1508,93 @@ mod tests {
         assert!(MAX_LOGIN_ATTEMPTS <= 100);
         assert!(RATE_LIMIT_WINDOW_SECS > 0);
         assert!(RATE_LIMIT_WINDOW_SECS <= 3600);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_channel() {
+        let (tx, mut rx) = broadcast::channel(16);
+        let msg = "test message";
+        tx.send(Arc::from(msg)).unwrap();
+        let received: Arc<str> = rx.recv().await.unwrap();
+        assert_eq!(msg, &*received);
+    }
+
+    #[tokio::test]
+    async fn test_ws_message_serialization() {
+        let id = Uuid::new_v4();
+        let msg = WsMessage::MediaDeleted { id };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("MediaDeleted"));
+        assert!(json.contains(&id.to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_ws_integration() {
+        use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessageProto};
+        use futures_util::StreamExt;
+        use std::time::Duration;
+
+        let (tx, _) = broadcast::channel(16);
+        let state = AppState {
+            upload_use_case: Arc::new(crate::application::UploadMediaUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::OrtProcessor::new_empty()),
+                Arc::new(crate::infrastructure::PhashGenerator::new()),
+                PathBuf::from("uploads"),
+                PathBuf::from("thumbnails"),
+            )),
+            search_use_case: Arc::new(crate::application::SearchSimilarUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::OrtProcessor::new_empty()),
+            )),
+            list_use_case: Arc::new(crate::application::ListMediaUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            )),
+            delete_use_case: Arc::new(crate::application::DeleteMediaUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                PathBuf::from("uploads"),
+                PathBuf::from("thumbnails"),
+            )),
+            group_use_case: Arc::new(crate::application::GroupMediaUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            )),
+            tag_learning_use_case: Arc::new(crate::application::TagLearningUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            )),
+            repo: Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            upload_dir: PathBuf::from("uploads"),
+            auth_config: None,
+            upload_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
+            login_rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            download_plans: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            tx: tx.clone(),
+        };
+
+        let app = app_router(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let ws_url = format!("ws://{}/ws", addr);
+        let (mut ws_stream, _) = connect_async(ws_url).await.expect("Failed to connect");
+
+        let id = Uuid::new_v4();
+        state.broadcast(WsMessage::MediaDeleted { id });
+
+        let msg = tokio::time::timeout(Duration::from_secs(1), ws_stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        if let WsMessageProto::Text(text) = msg {
+            assert!(text.contains("MediaDeleted"));
+            assert!(text.contains(&id.to_string()));
+        } else {
+            panic!("Received wrong WS message type");
+        }
     }
 }

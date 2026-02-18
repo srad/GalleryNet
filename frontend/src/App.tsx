@@ -7,6 +7,8 @@ import SearchView from './components/SearchView';
 import LoginView from './components/LoginView';
 import LoadingIndicator from './components/LoadingIndicator';
 import { apiFetch } from './auth';
+import { useWebSocket } from './useWebSocket';
+
 
 type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
 
@@ -34,6 +36,9 @@ export default function App() {
     });
     const [refreshKey, setRefreshKey] = useState(0);
     const [isBusy, setIsBusy] = useState(false);
+
+    // Initial load: Check auth and fetch folders
+
 
     // Initial load: Check auth and fetch folders
     useEffect(() => {
@@ -110,7 +115,17 @@ export default function App() {
         navigate(`/search?source=${mediaId}`);
     }, [navigate]);
 
+    // Initialize WebSocket for real-time updates
+    useWebSocket(
+        useCallback(() => {
+            if (authState === 'authenticated') fetchFolders();
+        }, [authState, fetchFolders]),
+        handleUploadComplete,
+        authState === 'authenticated'
+    );
+
     // Routing Logic
+
     const isGallery = location.pathname === '/';
     const isFavorites = location.pathname === '/favorites';
     const isSearch = location.pathname.startsWith('/search');

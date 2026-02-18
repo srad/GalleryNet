@@ -9,6 +9,8 @@ const SESSION_POOL_SIZE: usize = 4;
 pub struct OrtProcessor {
     pool: Mutex<Vec<Session>>,
     available: Condvar,
+    #[cfg(test)]
+    is_mock: bool,
 }
 
 impl OrtProcessor {
@@ -25,13 +27,31 @@ impl OrtProcessor {
         Ok(Self {
             pool: Mutex::new(sessions),
             available: Condvar::new(),
+            #[cfg(test)]
+            is_mock: false,
         })
+    }
+
+    #[cfg(test)]
+    pub fn new_empty() -> Self {
+        Self {
+            pool: Mutex::new(vec![]),
+            available: Condvar::new(),
+            is_mock: true,
+        }
     }
 
     fn with_session<T, F>(&self, f: F) -> Result<T, DomainError>
     where
         F: FnOnce(&mut Session) -> Result<T, DomainError>,
     {
+        #[cfg(test)]
+        if self.is_mock {
+            return Err(DomainError::Ai(
+                "Mock processor has no sessions".to_string(),
+            ));
+        }
+
         let mut session = {
             let mut pool = self
                 .pool

@@ -636,7 +636,8 @@ mod tests {
         insert_media(&db.repo, id2, "2024-06-15T00:00:00Z", 200);
         insert_media(&db.repo, id3, "2024-03-10T00:00:00Z", 300);
 
-        let results = db.repo
+        let results = db
+            .repo
             .find_all_impl(10, 0, None, false, None, false, "date")
             .unwrap();
         assert_eq!(results.len(), 3);
@@ -657,7 +658,8 @@ mod tests {
         insert_media(&db.repo, id2, "2024-06-15T00:00:00Z", 200);
         insert_media(&db.repo, id3, "2024-03-10T00:00:00Z", 300);
 
-        let results = db.repo
+        let results = db
+            .repo
             .find_all_impl(10, 0, None, false, None, true, "date")
             .unwrap();
         assert_eq!(results.len(), 3);
@@ -678,7 +680,8 @@ mod tests {
         insert_media(&db.repo, id2, "2024-06-15T00:00:00Z", 100);
         insert_media(&db.repo, id3, "2024-03-10T00:00:00Z", 9999);
 
-        let results = db.repo
+        let results = db
+            .repo
             .find_all_impl(10, 0, None, false, None, false, "size")
             .unwrap();
         assert_eq!(results.len(), 3);
@@ -699,7 +702,8 @@ mod tests {
         insert_media(&db.repo, id2, "2024-06-15T00:00:00Z", 100);
         insert_media(&db.repo, id3, "2024-03-10T00:00:00Z", 9999);
 
-        let results = db.repo
+        let results = db
+            .repo
             .find_all_impl(10, 0, None, false, None, true, "size")
             .unwrap();
         assert_eq!(results.len(), 3);
@@ -719,8 +723,17 @@ mod tests {
         insert_media(&db.repo, id2, "2024-06-15T00:00:00Z", 50);
 
         // Unknown sort_by value should default to date ordering
-        let results = db.repo
-            .find_all_impl(10, 0, None, false, None, false, "bogus; DROP TABLE media;--")
+        let results = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                None,
+                false,
+                None,
+                false,
+                "bogus; DROP TABLE media;--",
+            )
             .unwrap();
         assert_eq!(results.len(), 2);
         // DESC by date: Jun, Jan
@@ -741,12 +754,16 @@ mod tests {
         insert_media(&db.repo, id3, "2024-03-10T00:00:00Z", 9999);
 
         // Create folder and add media
-        db.repo.create_folder_impl(folder_id, "Test Folder").unwrap();
-        db.repo.add_media_to_folder_impl(folder_id, &[id1, id2, id3])
+        db.repo
+            .create_folder_impl(folder_id, "Test Folder")
+            .unwrap();
+        db.repo
+            .add_media_to_folder_impl(folder_id, &[id1, id2, id3])
             .unwrap();
 
         // Sort folder by size descending
-        let results = db.repo
+        let results = db
+            .repo
             .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "size")
             .unwrap();
         assert_eq!(results.len(), 3);
@@ -755,7 +772,8 @@ mod tests {
         assert_eq!(results[2].id, id2); // 100
 
         // Sort folder by size ascending
-        let results = db.repo
+        let results = db
+            .repo
             .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, true, "size")
             .unwrap();
         assert_eq!(results.len(), 3);
@@ -778,26 +796,38 @@ mod tests {
         insert_media(&db.repo, vid1, "2024-03-01T00:00:00Z", 300);
 
         // Mark vid1 as video
-        db.repo.with_conn(|conn| {
-            conn.execute(
-                "UPDATE media SET media_type = 'video' WHERE id = ?1",
-                params![vid1.as_bytes()],
-            ).unwrap();
-            Ok(())
-        }).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute(
+                    "UPDATE media SET media_type = 'video' WHERE id = ?1",
+                    params![vid1.as_bytes()],
+                )
+                .unwrap();
+                Ok(())
+            })
+            .unwrap();
 
         // Filter images only
-        let images = db.repo.find_all_impl(10, 0, Some("image"), false, None, false, "date").unwrap();
+        let images = db
+            .repo
+            .find_all_impl(10, 0, Some("image"), false, None, false, "date")
+            .unwrap();
         assert_eq!(images.len(), 2);
         assert!(images.iter().all(|m| m.media_type == "image"));
 
         // Filter videos only
-        let videos = db.repo.find_all_impl(10, 0, Some("video"), false, None, false, "date").unwrap();
+        let videos = db
+            .repo
+            .find_all_impl(10, 0, Some("video"), false, None, false, "date")
+            .unwrap();
         assert_eq!(videos.len(), 1);
         assert_eq!(videos[0].id, vid1);
 
         // No filter — returns all
-        let all = db.repo.find_all_impl(10, 0, None, false, None, false, "date").unwrap();
+        let all = db
+            .repo
+            .find_all_impl(10, 0, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(all.len(), 3);
     }
 
@@ -817,18 +847,27 @@ mod tests {
         db.repo.set_favorite_impl(id3, true).unwrap();
 
         // Filter favorites
-        let favs = db.repo.find_all_impl(10, 0, None, true, None, false, "date").unwrap();
+        let favs = db
+            .repo
+            .find_all_impl(10, 0, None, true, None, false, "date")
+            .unwrap();
         assert_eq!(favs.len(), 2);
         assert!(favs.iter().all(|m| m.is_favorite));
 
         // Unfavorite id1
         db.repo.set_favorite_impl(id1, false).unwrap();
-        let favs = db.repo.find_all_impl(10, 0, None, true, None, false, "date").unwrap();
+        let favs = db
+            .repo
+            .find_all_impl(10, 0, None, true, None, false, "date")
+            .unwrap();
         assert_eq!(favs.len(), 1);
         assert_eq!(favs[0].id, id3);
 
         // No favorite filter — all returned, with correct is_favorite flag
-        let all = db.repo.find_all_impl(10, 0, None, false, None, false, "date").unwrap();
+        let all = db
+            .repo
+            .find_all_impl(10, 0, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(all.len(), 3);
         // id3 (Mar) is first in desc order and is favorited
         assert!(all.iter().find(|m| m.id == id3).unwrap().is_favorite);
@@ -847,27 +886,77 @@ mod tests {
         insert_media(&db.repo, id3, "2024-03-01T00:00:00Z", 300);
 
         // Tag id1 with "Nature", id2 with "City", id3 with both
-        db.repo.update_media_tags_impl(id1, vec!["Nature".to_string()]).unwrap();
-        db.repo.update_media_tags_impl(id2, vec!["City".to_string()]).unwrap();
-        db.repo.update_media_tags_impl(id3, vec!["Nature".to_string(), "City".to_string()]).unwrap();
+        db.repo
+            .update_media_tags_impl(id1, vec!["Nature".to_string()])
+            .unwrap();
+        db.repo
+            .update_media_tags_impl(id2, vec!["City".to_string()])
+            .unwrap();
+        db.repo
+            .update_media_tags_impl(id3, vec!["Nature".to_string(), "City".to_string()])
+            .unwrap();
 
         // Filter by "Nature" — should return id1 and id3
-        let nature = db.repo.find_all_impl(10, 0, None, false, Some(vec!["Nature".to_string()]), false, "date").unwrap();
+        let nature = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                None,
+                false,
+                Some(vec!["Nature".to_string()]),
+                false,
+                "date",
+            )
+            .unwrap();
         assert_eq!(nature.len(), 2);
         let nature_ids: Vec<Uuid> = nature.iter().map(|m| m.id).collect();
         assert!(nature_ids.contains(&id1));
         assert!(nature_ids.contains(&id3));
 
         // Filter by "City" — should return id2 and id3
-        let city = db.repo.find_all_impl(10, 0, None, false, Some(vec!["City".to_string()]), false, "date").unwrap();
+        let city = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                None,
+                false,
+                Some(vec!["City".to_string()]),
+                false,
+                "date",
+            )
+            .unwrap();
         assert_eq!(city.len(), 2);
 
         // Filter by both tags (OR) — should return all 3
-        let both = db.repo.find_all_impl(10, 0, None, false, Some(vec!["Nature".to_string(), "City".to_string()]), false, "date").unwrap();
+        let both = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                None,
+                false,
+                Some(vec!["Nature".to_string(), "City".to_string()]),
+                false,
+                "date",
+            )
+            .unwrap();
         assert_eq!(both.len(), 3);
 
         // Filter by nonexistent tag — should return nothing
-        let none = db.repo.find_all_impl(10, 0, None, false, Some(vec!["Nonexistent".to_string()]), false, "date").unwrap();
+        let none = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                None,
+                false,
+                Some(vec!["Nonexistent".to_string()]),
+                false,
+                "date",
+            )
+            .unwrap();
         assert_eq!(none.len(), 0);
     }
 
@@ -884,29 +973,70 @@ mod tests {
         insert_media(&db.repo, id3, "2024-03-01T00:00:00Z", 300);
         insert_media(&db.repo, id4, "2024-04-01T00:00:00Z", 400);
 
-        db.repo.with_conn(|conn| {
-            conn.execute("UPDATE media SET media_type = 'video' WHERE id = ?1", params![id2.as_bytes()]).unwrap();
-            Ok(())
-        }).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute(
+                    "UPDATE media SET media_type = 'video' WHERE id = ?1",
+                    params![id2.as_bytes()],
+                )
+                .unwrap();
+                Ok(())
+            })
+            .unwrap();
         db.repo.set_favorite_impl(id1, true).unwrap();
         db.repo.set_favorite_impl(id2, true).unwrap();
         db.repo.set_favorite_impl(id4, true).unwrap();
-        db.repo.update_media_tags_impl(id1, vec!["Nature".to_string()]).unwrap();
-        db.repo.update_media_tags_impl(id2, vec!["Nature".to_string()]).unwrap();
-        db.repo.update_media_tags_impl(id3, vec!["City".to_string()]).unwrap();
-        db.repo.update_media_tags_impl(id4, vec!["City".to_string()]).unwrap();
+        db.repo
+            .update_media_tags_impl(id1, vec!["Nature".to_string()])
+            .unwrap();
+        db.repo
+            .update_media_tags_impl(id2, vec!["Nature".to_string()])
+            .unwrap();
+        db.repo
+            .update_media_tags_impl(id3, vec!["City".to_string()])
+            .unwrap();
+        db.repo
+            .update_media_tags_impl(id4, vec!["City".to_string()])
+            .unwrap();
 
         // Favorite images only
-        let fav_images = db.repo.find_all_impl(10, 0, Some("image"), true, None, false, "date").unwrap();
+        let fav_images = db
+            .repo
+            .find_all_impl(10, 0, Some("image"), true, None, false, "date")
+            .unwrap();
         assert_eq!(fav_images.len(), 2); // id1, id4
-        assert!(fav_images.iter().all(|m| m.media_type == "image" && m.is_favorite));
+        assert!(fav_images
+            .iter()
+            .all(|m| m.media_type == "image" && m.is_favorite));
 
         // Favorite + Nature tag
-        let fav_nature = db.repo.find_all_impl(10, 0, None, true, Some(vec!["Nature".to_string()]), false, "date").unwrap();
+        let fav_nature = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                None,
+                true,
+                Some(vec!["Nature".to_string()]),
+                false,
+                "date",
+            )
+            .unwrap();
         assert_eq!(fav_nature.len(), 2); // id1, id2
 
         // Image + Nature tag + favorite
-        let img_nat_fav = db.repo.find_all_impl(10, 0, Some("image"), true, Some(vec!["Nature".to_string()]), false, "date").unwrap();
+        let img_nat_fav = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                Some("image"),
+                true,
+                Some(vec!["Nature".to_string()]),
+                false,
+                "date",
+            )
+            .unwrap();
         assert_eq!(img_nat_fav.len(), 1);
         assert_eq!(img_nat_fav[0].id, id1);
     }
@@ -920,28 +1050,45 @@ mod tests {
         // Insert 10 items with sequential dates
         let ids: Vec<Uuid> = (0..10).map(|_| Uuid::new_v4()).collect();
         for (i, id) in ids.iter().enumerate() {
-            insert_media(&db.repo, *id, &format!("2024-{:02}-01T00:00:00Z", i + 1), (i as i64 + 1) * 100);
+            insert_media(
+                &db.repo,
+                *id,
+                &format!("2024-{:02}-01T00:00:00Z", i + 1),
+                (i as i64 + 1) * 100,
+            );
         }
 
         // Page 1: limit 3, offset 0 (DESC: Oct, Sep, Aug)
-        let page1 = db.repo.find_all_impl(3, 0, None, false, None, false, "date").unwrap();
+        let page1 = db
+            .repo
+            .find_all_impl(3, 0, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(page1.len(), 3);
         assert_eq!(page1[0].id, ids[9]); // Oct (month 10)
         assert_eq!(page1[1].id, ids[8]); // Sep
         assert_eq!(page1[2].id, ids[7]); // Aug
 
         // Page 2: limit 3, offset 3 (DESC: Jul, Jun, May)
-        let page2 = db.repo.find_all_impl(3, 3, None, false, None, false, "date").unwrap();
+        let page2 = db
+            .repo
+            .find_all_impl(3, 3, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(page2.len(), 3);
         assert_eq!(page2[0].id, ids[6]); // Jul
 
         // Page 4: limit 3, offset 9 (only 1 item left)
-        let page4 = db.repo.find_all_impl(3, 9, None, false, None, false, "date").unwrap();
+        let page4 = db
+            .repo
+            .find_all_impl(3, 9, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(page4.len(), 1);
         assert_eq!(page4[0].id, ids[0]); // Jan
 
         // Beyond all: offset 10
-        let empty = db.repo.find_all_impl(3, 10, None, false, None, false, "date").unwrap();
+        let empty = db
+            .repo
+            .find_all_impl(3, 10, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(empty.len(), 0);
     }
 
@@ -951,13 +1098,21 @@ mod tests {
 
         let ids: Vec<Uuid> = (0..7).map(|_| Uuid::new_v4()).collect();
         for (i, id) in ids.iter().enumerate() {
-            insert_media(&db.repo, *id, &format!("2024-{:02}-01T00:00:00Z", i + 1), 100);
+            insert_media(
+                &db.repo,
+                *id,
+                &format!("2024-{:02}-01T00:00:00Z", i + 1),
+                100,
+            );
         }
 
         // Fetch all pages of size 3 and verify no overlap and full coverage
         let mut all_ids = Vec::new();
         for offset in (0..10).step_by(3) {
-            let page = db.repo.find_all_impl(3, offset, None, false, None, false, "date").unwrap();
+            let page = db
+                .repo
+                .find_all_impl(3, offset, None, false, None, false, "date")
+                .unwrap();
             for item in &page {
                 assert!(!all_ids.contains(&item.id), "Duplicate item across pages");
                 all_ids.push(item.id);
@@ -980,7 +1135,9 @@ mod tests {
             media_type: "image".to_string(),
             phash: "abc123".to_string(),
             uploaded_at: chrono::Utc::now(),
-            original_date: chrono::DateTime::parse_from_rfc3339("2024-06-15T12:00:00Z").unwrap().with_timezone(&chrono::Utc),
+            original_date: chrono::DateTime::parse_from_rfc3339("2024-06-15T12:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
             width: Some(1920),
             height: Some(1080),
             size_bytes: 5_000_000,
@@ -1054,7 +1211,10 @@ mod tests {
         assert_eq!(deleted, 3);
 
         // Verify remaining
-        let all = db.repo.find_all_impl(10, 0, None, false, None, false, "date").unwrap();
+        let all = db
+            .repo
+            .find_all_impl(10, 0, None, false, None, false, "date")
+            .unwrap();
         assert_eq!(all.len(), 2);
     }
 
@@ -1079,10 +1239,16 @@ mod tests {
         insert_media(&db.repo, id2, "2024-02-01T00:00:00Z", 2000);
         insert_media(&db.repo, id3, "2024-03-01T00:00:00Z", 3000);
 
-        db.repo.with_conn(|conn| {
-            conn.execute("UPDATE media SET media_type = 'video' WHERE id = ?1", params![id3.as_bytes()]).unwrap();
-            Ok(())
-        }).unwrap();
+        db.repo
+            .with_conn(|conn| {
+                conn.execute(
+                    "UPDATE media SET media_type = 'video' WHERE id = ?1",
+                    params![id3.as_bytes()],
+                )
+                .unwrap();
+                Ok(())
+            })
+            .unwrap();
 
         let counts = db.repo.media_counts_impl().unwrap();
         assert_eq!(counts.total, 3);
@@ -1116,10 +1282,22 @@ mod tests {
         ];
 
         for payload in &payloads {
-            let results = db.repo.find_all_impl(10, 0, None, false, None, false, payload).unwrap();
-            assert_eq!(results.len(), 2, "Injection payload should not crash: {}", payload);
+            let results = db
+                .repo
+                .find_all_impl(10, 0, None, false, None, false, payload)
+                .unwrap();
+            assert_eq!(
+                results.len(),
+                2,
+                "Injection payload should not crash: {}",
+                payload
+            );
             // Should be date DESC order (default fallthrough)
-            assert_eq!(results[0].id, id2, "Should default to date order for: {}", payload);
+            assert_eq!(
+                results[0].id, id2,
+                "Should default to date order for: {}",
+                payload
+            );
         }
     }
 
@@ -1139,12 +1317,23 @@ mod tests {
         ];
 
         for payload in &payloads {
-            let results = db.repo.find_all_impl(10, 0, Some(payload), false, None, false, "date").unwrap();
-            assert_eq!(results.len(), 0, "Injection via media_type should match nothing: {}", payload);
+            let results = db
+                .repo
+                .find_all_impl(10, 0, Some(payload), false, None, false, "date")
+                .unwrap();
+            assert_eq!(
+                results.len(),
+                0,
+                "Injection via media_type should match nothing: {}",
+                payload
+            );
         }
 
         // Normal filter still works
-        let results = db.repo.find_all_impl(10, 0, Some("image"), false, None, false, "date").unwrap();
+        let results = db
+            .repo
+            .find_all_impl(10, 0, Some("image"), false, None, false, "date")
+            .unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -1154,7 +1343,9 @@ mod tests {
 
         let id1 = Uuid::new_v4();
         insert_media(&db.repo, id1, "2024-01-01T00:00:00Z", 100);
-        db.repo.update_media_tags_impl(id1, vec!["Safe".to_string()]).unwrap();
+        db.repo
+            .update_media_tags_impl(id1, vec!["Safe".to_string()])
+            .unwrap();
 
         // Tags are passed as parameterized IN (?), so these are literal string comparisons
         let payloads = vec![
@@ -1164,20 +1355,39 @@ mod tests {
         ];
 
         for payload in &payloads {
-            let results = db.repo.find_all_impl(
-                10, 0, None, false,
-                Some(vec![payload.clone()]),
-                false, "date",
-            ).unwrap();
-            assert_eq!(results.len(), 0, "Injection via tags should match nothing: {}", payload);
+            let results = db
+                .repo
+                .find_all_impl(
+                    10,
+                    0,
+                    None,
+                    false,
+                    Some(vec![payload.clone()]),
+                    false,
+                    "date",
+                )
+                .unwrap();
+            assert_eq!(
+                results.len(),
+                0,
+                "Injection via tags should match nothing: {}",
+                payload
+            );
         }
 
         // Normal tag filter still works
-        let results = db.repo.find_all_impl(
-            10, 0, None, false,
-            Some(vec!["Safe".to_string()]),
-            false, "date",
-        ).unwrap();
+        let results = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                None,
+                false,
+                Some(vec!["Safe".to_string()]),
+                false,
+                "date",
+            )
+            .unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -1191,20 +1401,28 @@ mod tests {
         db.repo.create_folder_impl(folder_id, "Test").unwrap();
         insert_media(&db.repo, id1, "2024-01-01T00:00:00Z", 100);
         insert_media(&db.repo, id2, "2024-06-15T00:00:00Z", 200);
-        db.repo.add_media_to_folder_impl(folder_id, &[id1, id2]).unwrap();
+        db.repo
+            .add_media_to_folder_impl(folder_id, &[id1, id2])
+            .unwrap();
 
-        let payloads = [
-            "size; DROP TABLE media; --",
-            "1 OR 1=1",
-            "' OR '1'='1",
-        ];
+        let payloads = ["size; DROP TABLE media; --", "1 OR 1=1", "' OR '1'='1"];
 
         for payload in &payloads {
-            let results = db.repo.find_all_in_folder_impl(
-                folder_id, 10, 0, None, false, None, false, payload,
-            ).unwrap();
-            assert_eq!(results.len(), 2, "Injection should not crash in folder: {}", payload);
-            assert_eq!(results[0].id, id2, "Should default to date order for: {}", payload);
+            let results = db
+                .repo
+                .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, payload)
+                .unwrap();
+            assert_eq!(
+                results.len(),
+                2,
+                "Injection should not crash in folder: {}",
+                payload
+            );
+            assert_eq!(
+                results[0].id, id2,
+                "Should default to date order for: {}",
+                payload
+            );
         }
     }
 

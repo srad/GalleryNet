@@ -112,6 +112,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repo.clone(),
     ));
 
+    let (tx, _) = tokio::sync::broadcast::channel(100);
+
     // Initialize App State
     let state = AppState {
         upload_use_case,
@@ -126,7 +128,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         upload_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
         login_rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         download_plans: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        tx,
     };
+
 
 
     // --- ROUTING ARCHITECTURE ---

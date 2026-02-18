@@ -56,14 +56,16 @@ export class ApiClient {
         return res.json();
     }
 
-    async createFolder(name: string): Promise<void> {
+    async createFolder(name: string): Promise<Folder> {
         const res = await apiFetch(this.getUrl('/api/folders'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name }),
         });
         if (!res.ok) throw new Error('Failed to create folder');
+        return res.json();
     }
+
 
     async deleteFolder(id: string): Promise<void> {
         const res = await apiFetch(this.getUrl(`/api/folders/${id}`), {

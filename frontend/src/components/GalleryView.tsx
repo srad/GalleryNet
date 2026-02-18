@@ -131,7 +131,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const sortMenuRef = useRef<HTMLDivElement>(null);
     const [viewFavorites, setViewFavorites] = useState(favoritesOnly || false);
     const [filterTags, setFilterTags] = useState<string[]>([]);
+    const [thumbSize, setThumbSize] = useState<number>(() => {
+        const saved = localStorage.getItem('galleryThumbSize');
+        const val = saved ? parseInt(saved, 10) : 180;
+        // Ensure it's one of our predefined sizes, otherwise fallback to default
+        return [120, 180, 300].includes(val) ? val : 180;
+    });
     // Removed local selectedFilename state in favor of URL param
+
     const [showBatchTagModal, setShowBatchTagModal] = useState(false);
     const [showClearTagsConfirm, setShowClearTagsConfirm] = useState(false);
     const [batchTags, setBatchTags] = useState<string[]>([]);
@@ -1450,7 +1457,37 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
                         <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 hidden sm:block"></div>
 
+                        {/* Thumbnail Size Controls */}
+                        <div className="flex p-1 bg-gray-100/80 dark:bg-gray-800/80 rounded-xl border border-gray-200/50 dark:border-gray-700/50">
+                            {([
+                                { label: 'S', size: 120 },
+                                { label: 'M', size: 180 },
+                                { label: 'L', size: 300 }
+                            ]).map((opt) => (
+                                <button
+                                    key={opt.size}
+                                    onClick={() => {
+                                        setThumbSize(opt.size);
+                                        localStorage.setItem('galleryThumbSize', opt.size.toString());
+                                    }}
+                                    className={`
+                                        w-8 h-7 flex items-center justify-center text-[10px] font-bold rounded-lg transition-all duration-200
+                                        ${thumbSize === opt.size
+                                            ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-black/5 dark:ring-white/5'
+                                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/50 dark:hover:bg-gray-700/50'
+                                        }
+                                    `}
+                                    title={`Set thumbnail size to ${opt.label}`}
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 hidden sm:block"></div>
+
                         {/* Grouping */}
+
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => setIsGrouped(g => !g)}
@@ -1662,8 +1699,10 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 <div
                     ref={gridRef}
                     onMouseDown={handleGridMouseDown}
-                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 3xl:grid-cols-12 gap-0.5 select-none"
+                    className="grid gap-0.5 select-none"
+                    style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}
                 >
+
                     {media.map((item, index) => {
                         const date = new Date(item.original_date);
                         const year = isNaN(date.getTime()) ? 'Unknown' : date.getFullYear();
@@ -1729,7 +1768,11 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                     {group.items.length} items
                                 </span>
                             </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9 2xl:grid-cols-11 3xl:grid-cols-13 gap-0.5">
+                            <div 
+                                className="grid gap-0.5"
+                                style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}
+                            >
+
                                 {group.items.map((item) => (
                                     <MediaCard
                         key={item.filename}

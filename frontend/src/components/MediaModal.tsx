@@ -51,8 +51,32 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
     const [exifOpen, setExifOpen] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [prevId, setPrevId] = useState(item.id);
+    const videoRef = useRef<HTMLVideoElement>(null);
+
+    // Initial volume from localStorage
+    useEffect(() => {
+        if (video && videoRef.current) {
+            const savedVolume = localStorage.getItem('galleryVideoVolume');
+            const savedMuted = localStorage.getItem('galleryVideoMuted');
+            
+            if (savedVolume !== null) {
+                videoRef.current.volume = parseFloat(savedVolume);
+            }
+            if (savedMuted !== null) {
+                videoRef.current.muted = savedMuted === 'true';
+            }
+        }
+    }, [video, item.id]);
+
+    const handleVolumeChange = useCallback(() => {
+        if (videoRef.current) {
+            localStorage.setItem('galleryVideoVolume', videoRef.current.volume.toString());
+            localStorage.setItem('galleryVideoMuted', videoRef.current.muted.toString());
+        }
+    }, []);
 
     // Reset state when item changes (derived state pattern)
+
     if (item.id !== prevId) {
         setPrevId(item.id);
         setDetail(null);
@@ -95,8 +119,16 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
         return () => {
             document.removeEventListener('keydown', handleKeyDown);
             document.body.style.overflow = prev;
+            // Ensure any videos in this modal instance are stopped when unmounting
+            const videos = backdropRef.current?.querySelectorAll('video');
+            videos?.forEach(v => {
+                v.pause();
+                v.src = "";
+                v.load();
+            });
         };
     }, [handleKeyDown]);
+
 
     // Close on backdrop click
     const handleBackdropClick = useCallback((e: React.MouseEvent) => {
@@ -241,14 +273,17 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                     {video ? (
                         <video
                             key={item.filename}
+                            ref={videoRef}
                             src={mediaUrl}
                             controls
                             autoPlay
                             draggable
                             onDragStart={handleDragStart}
+                            onVolumeChange={handleVolumeChange}
                             className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl cursor-grab active:cursor-grabbing"
                         />
                     ) : (
+
                         <img
                             key={item.filename}
                             src={mediaUrl}

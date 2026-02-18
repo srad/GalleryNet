@@ -1,5 +1,6 @@
 import {useState, useCallback, useRef} from 'react';
-import {Link, useLocation} from 'react-router-dom';
+import {Link, useLocation, useNavigate} from 'react-router-dom';
+
 import {PhotoIcon, SearchIcon, HeartIcon} from './Icons';
 import type {Folder} from '../types';
 import {apiClient} from '../api';
@@ -22,9 +23,11 @@ interface SidebarProps {
 
 export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled, mobileOpen, onMobileClose}: SidebarProps) {
     const location = useLocation();
+    const navigate = useNavigate();
     const {isDark, toggle: toggleTheme} = useTheme();
     const [newFolderName, setNewFolderName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
+
 
     // --- Rename state ---
     const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -48,14 +51,17 @@ export default function Sidebar({refreshKey, folders, onFoldersChanged, disabled
         if (!name) return;
         setIsCreating(true);
         try {
-            await apiClient.createFolder(name);
+            const folder = await apiClient.createFolder(name);
             setNewFolderName('');
             onFoldersChanged();
+            navigate(`/folders/${folder.id}`);
+            if (onMobileClose) onMobileClose();
         } catch (e) {
             console.error('Failed to create folder:', e);
         }
         setIsCreating(false);
-    }, [newFolderName, onFoldersChanged]);
+    }, [newFolderName, onFoldersChanged, navigate, onMobileClose]);
+
 
     const handleDeleteFolder = useCallback(async (e: React.MouseEvent, folder: Folder) => {
         e.preventDefault(); // Prevent navigation

@@ -126,6 +126,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (tx, _) = tokio::sync::broadcast::channel(100);
 
+    // Initialize Background Tasks
+    let task_runner = application::TaskRunner::new(
+        fix_thumbnails_use_case.clone(),
+        tx.clone(),
+    );
+    task_runner.start();
+
     // Initialize App State
     let state = AppState {
         upload_use_case,
@@ -143,6 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         download_plans: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         tx,
     };
+
 
 
 

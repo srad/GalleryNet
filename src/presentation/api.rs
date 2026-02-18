@@ -576,12 +576,13 @@ async fn upload_handler(
         let (filename, temp_path) = pending.into_iter().next().unwrap();
         let data = tokio::fs::read(&temp_path).await.map_err(|e| DomainError::Io(e.to_string()))?;
         let _ = tokio::fs::remove_file(&temp_path).await;
-        let media = state.upload_use_case.execute(filename, &data).await?;
+        let media: MediaItem = state.upload_use_case.execute(filename, &data).await?;
         state.broadcast(WsMessage::MediaCreated { 
             item: serde_json::to_value(&media).unwrap() 
         });
         return Ok((StatusCode::CREATED, Json(serde_json::to_value(media).unwrap())));
     }
+
 
     // Multiple files — process concurrently, return array of results
     let mut handles = Vec::with_capacity(pending.len());
@@ -610,8 +611,12 @@ async fn upload_handler(
                     });
                     UploadResult { media: Some(media), error: None, filename }
                 },
-                Err(e) => UploadResult { media: None, error: Some(e.to_string()), filename },
+                Err(e) => {
+                    let err_msg: String = e.to_string();
+                    UploadResult { media: None, error: Some(err_msg), filename }
+                },
             }
+
         }));
     }
 

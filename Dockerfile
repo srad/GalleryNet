@@ -66,6 +66,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     ca-certificates \
     ffmpeg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -81,6 +82,11 @@ COPY assets /app/assets
 # Copy the built frontend
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
+# Copy the entrypoint script
+COPY docker-entrypoint.sh /app/
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 # Set library path so the app finds onnxruntime
 ENV LD_LIBRARY_PATH=/app
 
@@ -90,4 +96,4 @@ ENV GALLERY_PASSWORD=""
 
 EXPOSE 3000
 
-CMD ["./gallerynet"]
+CMD ["./docker-entrypoint.sh"]

@@ -26,7 +26,10 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 use tokio::io::AsyncWriteExt;
 
-use crate::application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, TagLearningUseCase};
+use crate::application::{
+    DeleteMediaUseCase, FixThumbnailsUseCase, GroupMediaUseCase, ListMediaUseCase,
+    SearchSimilarUseCase, TagLearningUseCase, UploadMediaUseCase,
+};
 use crate::domain::{DomainError, MediaItem, MediaRepository};
 use crate::presentation::auth::AuthConfig;
 
@@ -80,6 +83,8 @@ pub enum WsMessage {
     UploadComplete,
     TagLearningComplete { tag_name: String },
     FullRefresh,
+    ThumbnailFixStarted,
+    ThumbnailFixCompleted { count: usize },
 }
 
 // App State
@@ -91,6 +96,7 @@ pub struct AppState {
     pub delete_use_case: Arc<DeleteMediaUseCase>,
     pub group_use_case: Arc<GroupMediaUseCase>,
     pub tag_learning_use_case: Arc<TagLearningUseCase>,
+    pub fix_thumbnails_use_case: Arc<FixThumbnailsUseCase>,
     pub repo: Arc<dyn MediaRepository>,
     pub upload_dir: PathBuf,
     pub auth_config: Option<AuthConfig>,
@@ -278,6 +284,7 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media/download/plan", post(batch_download_plan_handler))
         .route("/media/download/stream/{part_id}", get(batch_download_stream_handler))
         .route("/media/group", post(group_media_handler))
+        .route("/media/fix-thumbnails", post(fix_thumbnails_handler))
 
         .route("/media/{id}", get(get_media_handler).delete(delete_handler))
         .route("/media/{id}/favorite", post(toggle_favorite_handler))
@@ -1263,6 +1270,34 @@ async fn group_media_handler(
     Ok(Json(groups))
 }
 
+async fn fix_thumbnails_handler(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.broadcast(WsMessage::ThumbnailFixStarted);
+    let result = state.fix_thumbnails_use_case.execute().await;
+    match result {
+        Ok(fixed_items) => {
+            let fixed_count = fixed_items.len();
+            
+            for item in fixed_items {
+                if let Ok(json_item) = serde_json::to_value(&item) {
+                    state.broadcast(WsMessage::MediaUpdated { 
+                        id: item.id, 
+                        item: json_item 
+                    });
+                }
+            }
+
+            state.broadcast(WsMessage::ThumbnailFixCompleted { count: fixed_count });
+            Ok(Json(json!({ "fixed_count": fixed_count })))
+        }
+        Err(e) => {
+            state.broadcast(WsMessage::ThumbnailFixCompleted { count: 0 });
+            Err(e)
+        }
+    }
+}
+
 // ==================== Folder endpoints ====================
 
 #[derive(Deserialize)]
@@ -1560,6 +1595,13 @@ mod tests {
             )),
             tag_learning_use_case: Arc::new(crate::application::TagLearningUseCase::new(
                 Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            )),
+            fix_thumbnails_use_case: Arc::new(crate::application::FixThumbnailsUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::OrtProcessor::new_empty()),
+                Arc::new(crate::infrastructure::PhashGenerator::new()),
+                PathBuf::from("uploads"),
+                PathBuf::from("thumbnails"),
             )),
             repo: Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
             upload_dir: PathBuf::from("uploads"),

@@ -31,6 +31,11 @@ pub trait MediaRepository: Send + Sync {
         media: &MediaItem,
         vector: Option<&[f32]>,
     ) -> Result<(), DomainError>;
+    fn update_media_and_vector(
+        &self,
+        media: &MediaItem,
+        vector: Option<&[f32]>,
+    ) -> Result<(), DomainError>;
     fn exists_by_phash(&self, phash: &str) -> Result<bool, DomainError>;
     fn find_similar(
         &self,
@@ -144,6 +149,7 @@ pub trait MediaRepository: Send + Sync {
     fn get_tag_name_by_id(&self, tag_id: i64) -> Result<Option<String>, DomainError>;
     fn get_manual_positives(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError>;
     fn get_all_ids_with_tag(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError>;
+    fn find_media_without_phash(&self) -> Result<Vec<MediaItem>, DomainError>;
 }
 
 pub trait AiProcessor: Send + Sync {

@@ -69,6 +69,88 @@ impl SqliteRepository {
         })
     }
 
+    pub(crate) fn update_media_and_vector_impl(
+        &self,
+        media: &MediaItem,
+        vector: Option<&[f32]>,
+    ) -> Result<(), DomainError> {
+        self.with_conn(|conn| {
+            conn.execute("BEGIN", [])
+                .map_err(|e| DomainError::Database(e.to_string()))?;
+
+            let uuid_bytes = media.id.as_bytes();
+            let timestamp_str = media.uploaded_at.to_rfc3339();
+            let original_date_str = media.original_date.to_rfc3339();
+
+            // Update media table
+            let res = conn.execute(
+                "UPDATE media SET 
+                    filename = ?2,
+                    original_filename = ?3,
+                    media_type = ?4,
+                    phash = ?5,
+                    uploaded_at = ?6,
+                    original_date = ?7,
+                    width = ?8,
+                    height = ?9,
+                    size_bytes = ?10,
+                    exif_json = ?11
+                 WHERE id = ?1",
+                params![
+                    uuid_bytes,
+                    media.filename,
+                    media.original_filename,
+                    media.media_type,
+                    media.phash,
+                    timestamp_str,
+                    original_date_str,
+                    media.width,
+                    media.height,
+                    media.size_bytes,
+                    media.exif_json
+                ],
+            );
+
+            if let Err(e) = res {
+                let _ = conn.execute("ROLLBACK", []);
+                return Err(DomainError::Database(e.to_string()));
+            }
+
+            // Update vector: get rowid, delete from vec_media, re-insert
+            let rowid: Option<i64> = conn
+                .prepare("SELECT rowid FROM media WHERE id = ?1")
+                .and_then(|mut s| s.query_row(params![uuid_bytes], |r| r.get(0)))
+                .ok();
+
+            if let Some(rowid) = rowid {
+                let _ = conn.execute("DELETE FROM vec_media WHERE rowid = ?1", params![rowid]);
+
+                if let Some(v) = vector {
+                    let vector_bytes: &[u8] = unsafe {
+                        std::slice::from_raw_parts(
+                            v.as_ptr() as *const u8,
+                            v.len() * size_of::<f32>(),
+                        )
+                    };
+
+                    let res = conn.execute(
+                        "INSERT INTO vec_media (rowid, embedding) VALUES (?1, ?2)",
+                        params![rowid, vector_bytes],
+                    );
+
+                    if let Err(e) = res {
+                        let _ = conn.execute("ROLLBACK", []);
+                        return Err(DomainError::Database(e.to_string()));
+                    }
+                }
+            }
+
+            conn.execute("COMMIT", [])
+                .map_err(|e| DomainError::Database(e.to_string()))?;
+            Ok(())
+        })
+    }
+
     pub(crate) fn exists_by_phash_impl(&self, phash: &str) -> Result<bool, DomainError> {
         self.with_conn(|conn| {
             let mut stmt = conn
@@ -276,6 +358,82 @@ impl SqliteRepository {
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                 Err(e) => Err(DomainError::Database(e.to_string())),
             }
+        })
+    }
+
+    pub(crate) fn find_media_without_phash_impl(&self) -> Result<Vec<MediaItem>, DomainError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite
+                 FROM media m
+                 LEFT JOIN favorites f ON f.media_id = m.id
+                 WHERE m.phash = 'no_hash'"
+            ).map_err(|e| DomainError::Database(e.to_string()))?;
+
+            let rows = stmt
+                .query_map([], |row| {
+                    let id_bytes: Vec<u8> = row.get(0)?;
+                    let filename: String = row.get(1)?;
+                    let original_filename: String = row.get(2)?;
+                    let media_type: String = row.get(3)?;
+                    let phash: String = row.get(4)?;
+                    let timestamp_str: String = row.get(5)?;
+                    let original_date_str: String = row.get(6)?;
+                    let width: Option<u32> = row.get(7)?;
+                    let height: Option<u32> = row.get(8)?;
+                    let size_bytes: i64 = row.get(9)?;
+                    let exif_json: Option<String> = row.get(10)?;
+                    let is_favorite: bool = row.get(11)?;
+
+                    let id = Uuid::from_slice(&id_bytes).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Blob,
+                            Box::new(e),
+                        )
+                    })?;
+                    let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str)
+                        .map_err(|e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                5,
+                                rusqlite::types::Type::Text,
+                                Box::new(e),
+                            )
+                        })?
+                        .with_timezone(&Utc);
+                    let original_date = DateTime::parse_from_rfc3339(&original_date_str)
+                        .map_err(|e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                6,
+                                rusqlite::types::Type::Text,
+                                Box::new(e),
+                            )
+                        })?
+                        .with_timezone(&Utc);
+
+                    Ok(MediaItem {
+                        id,
+                        filename,
+                        original_filename,
+                        media_type,
+                        phash,
+                        uploaded_at,
+                        original_date,
+                        width,
+                        height,
+                        size_bytes,
+                        exif_json,
+                        is_favorite,
+                        tags: vec![],
+                    })
+                })
+                .map_err(|e| DomainError::Database(e.to_string()))?;
+
+            let mut items = Vec::new();
+            for row in rows {
+                items.push(row.map_err(|e| DomainError::Database(e.to_string()))?);
+            }
+            Ok(items)
         })
     }
 

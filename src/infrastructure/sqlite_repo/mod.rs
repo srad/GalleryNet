@@ -286,6 +286,14 @@ impl MediaRepository for SqliteRepository {
         self.save_metadata_and_vector_impl(media, vector)
     }
 
+    fn update_media_and_vector(
+        &self,
+        media: &MediaItem,
+        vector: Option<&[f32]>,
+    ) -> Result<(), DomainError> {
+        self.update_media_and_vector_impl(media, vector)
+    }
+
     fn exists_by_phash(&self, phash: &str) -> Result<bool, DomainError> {
         self.exists_by_phash_impl(phash)
     }
@@ -498,6 +506,10 @@ impl MediaRepository for SqliteRepository {
 
     fn get_all_ids_with_tag(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError> {
         self.get_all_ids_with_tag_impl(tag_id)
+    }
+
+    fn find_media_without_phash(&self) -> Result<Vec<MediaItem>, DomainError> {
+        self.find_media_without_phash_impl()
     }
 }
 

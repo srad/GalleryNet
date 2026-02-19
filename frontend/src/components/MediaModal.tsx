@@ -68,6 +68,17 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
         }
     }, [video, item.id]);
 
+    // Reset video element when navigating between videos (Firefox fix)
+    useEffect(() => {
+        if (!video || !videoRef.current) return;
+        
+        const videoEl = videoRef.current;
+        videoEl.pause();
+        videoEl.removeAttribute('src');
+        videoEl.src = mediaUrl;
+        videoEl.load();
+    }, [video, mediaUrl]);
+
     const handleVolumeChange = useCallback(() => {
         if (videoRef.current) {
             localStorage.setItem('galleryVideoVolume', videoRef.current.volume.toString());

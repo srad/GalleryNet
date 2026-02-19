@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 interface ConfirmDialogProps {
     isOpen: boolean;
     title: string;
@@ -19,6 +21,45 @@ export default function ConfirmDialog({
     onConfirm,
     onCancel
 }: ConfirmDialogProps) {
+    const cancelRef = useRef<HTMLButtonElement>(null);
+    const confirmRef = useRef<HTMLButtonElement>(null);
+
+    // Focus management when opening
+    useEffect(() => {
+        if (isOpen) {
+            // Small timeout to ensure render is complete and to play nice with focus transitions
+            setTimeout(() => {
+                cancelRef.current?.focus();
+            }, 100);
+        }
+    }, [isOpen]);
+
+    // Handle keyboard navigation
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Stop propagation to prevent background interactions (e.g. video seeking, gallery nav)
+            e.stopPropagation();
+            
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                cancelRef.current?.focus();
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                confirmRef.current?.focus();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                onCancel();
+            }
+            // Enter is handled natively by the button's onClick when focused
+        };
+
+        // Use capture phase to intercept events early
+        window.addEventListener('keydown', handleKeyDown, true);
+        return () => window.removeEventListener('keydown', handleKeyDown, true);
+    }, [isOpen, onCancel]);
+
     if (!isOpen) return null;
 
     return (
@@ -30,12 +71,14 @@ export default function ConfirmDialog({
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-900 px-6 py-4 flex items-center justify-end gap-3 border-t border-gray-100 dark:border-gray-700">
                     <button
+                        ref={cancelRef}
                         onClick={onCancel}
                         className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
                     >
                         {cancelLabel}
                     </button>
                     <button
+                        ref={confirmRef}
                         onClick={onConfirm}
                         className={`px-4 py-2 text-sm font-medium text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors ${
                             isDestructive

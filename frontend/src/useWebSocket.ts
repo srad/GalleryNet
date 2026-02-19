@@ -96,7 +96,6 @@ export function useWebSocket(
             socket.onmessage = (event) => {
                 try {
                     const msg: WsMessage = JSON.parse(event.data);
-                    console.log('WS Message:', msg);
 
                     switch (msg.type) {
                         case 'MediaCreated':

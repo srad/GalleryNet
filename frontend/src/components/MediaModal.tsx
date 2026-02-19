@@ -49,7 +49,6 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
 
     const [detail, setDetail] = useState<MediaItem | null>(null);
     const [exifOpen, setExifOpen] = useState(false);
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [prevId, setPrevId] = useState(item.id);
     const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -118,10 +117,15 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
 
     // Keyboard navigation
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
+        // Ignore if user is typing in an input/textarea
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+
         if (e.key === 'Escape') onClose();
         else if (e.key === 'ArrowLeft' && onPrev) onPrev();
         else if (e.key === 'ArrowRight' && onNext) onNext();
-    }, [onClose, onPrev, onNext]);
+        else if (e.key === 'Delete' && onDelete) onDelete();
+    }, [onClose, onPrev, onNext, onDelete]);
 
     useEffect(() => {
         document.addEventListener('keydown', handleKeyDown);
@@ -232,7 +236,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                 </a>
                 {onDelete && (
                     <button 
-                        onClick={() => setShowDeleteConfirm(true)} 
+                        onClick={onDelete} 
                         className="w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-red-200 hover:text-red-100 hover:bg-black/60 backdrop-blur-md transition-colors"
                     >
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -420,7 +424,7 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                         {/* Delete Button */}
                         {onDelete && (
                             <button
-                                onClick={() => setShowDeleteConfirm(true)}
+                                onClick={onDelete}
                                 className="flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium rounded-lg bg-red-500/20 text-red-200 hover:bg-red-500/30 hover:text-white transition-colors border border-red-500/30"
                             >
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -445,19 +449,6 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                     </div>
                 </div>
             </div>
-            <ConfirmDialog
-                isOpen={showDeleteConfirm}
-                title="Delete Media"
-                message="Are you sure you want to delete this item? This cannot be undone."
-                confirmLabel="Delete"
-                cancelLabel="Cancel"
-                isDestructive={true}
-                onConfirm={() => {
-                    onDelete?.();
-                    setShowDeleteConfirm(false);
-                }}
-                onCancel={() => setShowDeleteConfirm(false)}
-            />
         </div>
     );
 }

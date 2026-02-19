@@ -155,8 +155,8 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
     const abortControllerRef = useRef<AbortController | null>(null);
     const [showCancelAutoTagConfirm, setShowCancelAutoTagConfirm] = useState(false);
     const [showStartAutoTagConfirm, setShowStartAutoTagConfirm] = useState(false);
-    const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
-    const [showRemoveFromFolderConfirm, setShowRemoveFromFolderConfirm] = useState(false);
+    const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+    const [pendingRemoveFromFolderIds, setPendingRemoveFromFolderIds] = useState<string[] | null>(null);
     const [autoTagResult, setAutoTagResult] = useState<{ title: string; message: string } | null>(null);
     const mediaRef = useRef<MediaItem[]>(media);
     // Track the last viewed item in modal for keyboard nav sync when modal closes
@@ -902,90 +902,73 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
         }
     }, [selected.size]);
 
-    // --- Batch delete ---
-    const handleBatchDelete = useCallback(async (force = false) => {
-        if (selected.size === 0) return;
-        if (!force) {
-            setShowBatchDeleteConfirm(true);
-            return;
-        }
+    // --- Delete handlers ---
+
+    // Trigger delete flow (either single or batch)
+    const requestDelete = useCallback((ids: string[]) => {
+        if (ids.length === 0) return;
+        setPendingDeleteIds(ids);
+    }, []);
+
+    // Execute delete after confirmation
+    const confirmDelete = useCallback(async () => {
+        if (!pendingDeleteIds || pendingDeleteIds.length === 0) return;
 
         setIsDeleting(true);
         try {
-            // Resolve filenames -> IDs
-            const ids = media
-                .filter(m => selected.has(m.id!) && m.id)
-                .map(m => m.id!);
-
-            await apiClient.deleteMediaBatch(ids);
+            await apiClient.deleteMediaBatch(pendingDeleteIds);
             
             // Dispatch delete events
-            ids.forEach(id => fireMediaUpdate(id, {}, 'delete'));
+            pendingDeleteIds.forEach(id => fireMediaUpdate(id, {}, 'delete'));
 
             exitSelectionMode();
-            setShowBatchDeleteConfirm(false);
-            if (activeFolderId) onFoldersChanged();
-        } catch (e) {
-            console.error('Batch delete error:', e);
-        } finally {
-            setIsDeleting(false);
-        }
-    }, [selected, media, exitSelectionMode, activeFolderId, onFoldersChanged]);
-
-
-    const handleSingleDelete = useCallback(async (item: MediaItem) => {
-        if (!item.id) return;
-        setIsDeleting(true);
-        try {
-            await apiClient.deleteMedia(item.id);
-            fireMediaUpdate(item.id, {}, 'delete');
-
-            setSearchParams(prev => {
-                const next = new URLSearchParams(prev);
-                next.delete('media');
-                return next;
-            });
+            setPendingDeleteIds(null);
             if (activeFolderId) onFoldersChanged();
         } catch (e) {
             console.error('Delete error:', e);
         } finally {
             setIsDeleting(false);
         }
-    }, [activeFolderId, onFoldersChanged, setSearchParams]);
+    }, [pendingDeleteIds, exitSelectionMode, activeFolderId, onFoldersChanged]);
+
+
+    const handleSingleDelete = useCallback(async (item: MediaItem) => {
+        // Legacy/Modal delete flow - redirects to unified flow if item.id exists
+        if (item.id) requestDelete([item.id]);
+    }, [requestDelete]);
 
 
 
-    // --- Remove from folder (when viewing a folder) ---
-    const handleRemoveFromFolder = useCallback(async (force = false) => {
-        if (selected.size === 0 || !activeFolderId) return;
-        if (!force) {
-            setShowRemoveFromFolderConfirm(true);
-            return;
-        }
+    // --- Remove from folder handlers ---
+
+    // Trigger remove flow
+    const requestRemoveFromFolder = useCallback((ids: string[]) => {
+        if (ids.length === 0 || !activeFolderId) return;
+        setPendingRemoveFromFolderIds(ids);
+    }, [activeFolderId]);
+
+    // Execute remove after confirmation
+    const confirmRemoveFromFolder = useCallback(async () => {
+        if (!pendingRemoveFromFolderIds || pendingRemoveFromFolderIds.length === 0 || !activeFolderId) return;
 
         setIsDeleting(true);
         try {
-            const ids = media
-                .filter(m => selected.has(m.id!) && m.id)
-                .map(m => m.id!);
-
-            await apiClient.removeMediaFromFolder(activeFolderId, ids);
+            await apiClient.removeMediaFromFolder(activeFolderId, pendingRemoveFromFolderIds);
 
             // Removing from folder only affects the current view, but metadata might need sync
             // Actually, we can just remove locally
-            setMedia(prev => prev.filter(m => !selected.has(m.id!)));
+            const removedSet = new Set(pendingRemoveFromFolderIds);
+            setMedia(prev => prev.filter(m => !removedSet.has(m.id!)));
             
             exitSelectionMode();
-            setShowRemoveFromFolderConfirm(false);
+            setPendingRemoveFromFolderIds(null);
             onFoldersChanged();
         } catch (e) {
             console.error('Remove from folder error:', e);
         } finally {
             setIsDeleting(false);
         }
-    }, [selected, media, activeFolderId, exitSelectionMode, onFoldersChanged]);
-
-
+    }, [pendingRemoveFromFolderIds, activeFolderId, exitSelectionMode, onFoldersChanged]);
 
 
     // --- Add selected items to a folder ---
@@ -1008,6 +991,216 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
             setIsAddingToFolder(false);
         }
     }, [selected, media, exitSelectionMode, onFoldersChanged]);
+
+    // --- Unified Keyboard Handler ---
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // 1. GLOBAL GUARDS: Check if we should ignore keys due to other layers
+            const isInput = (e.target as HTMLElement).tagName === 'INPUT' || 
+                           (e.target as HTMLElement).tagName === 'TEXTAREA' || 
+                           (e.target as HTMLElement).isContentEditable;
+            
+            const isDialogOpen = !!pendingDeleteIds || 
+                                 !!pendingRemoveFromFolderIds || 
+                                 showBatchTagModal || 
+                                 showStartAutoTagConfirm || 
+                                 showCancelAutoTagConfirm || 
+                                 showClearTagsConfirm ||
+                                 !!autoTagResult;
+
+            const isModalOpen = !!selectedMediaId && (
+                media.some(m => m.id === selectedMediaId) || 
+                (isGrouped && groups.some(g => g.items.some(m => m.id === selectedMediaId))) ||
+                !!standaloneItem
+            );
+
+            // If an input is focused, or ANY dialog/modal is open, or the view is inactive
+            if (isInput || isDialogOpen || isModalOpen || !isActive) {
+                return;
+            }
+
+            // 2. GLOBAL SHORTCUTS (Grid Context)
+            
+            // Escape: Exit selection mode
+            if (e.key === 'Escape') {
+                if (selectionMode) {
+                    e.preventDefault();
+                    exitSelectionMode();
+                }
+                return;
+            }
+
+            // Ctrl+A: Select All
+            if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+                e.preventDefault();
+                if (media.length > 0) {
+                    if (!selectionMode) setSelectionMode(true);
+                    const allIds = new Set(media.filter(m => m.id).map(m => m.id!));
+                    setSelected(allIds);
+                }
+                return;
+            }
+
+            // Delete / Backspace: Delete items
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                e.preventDefault();
+                let targetIds: string[] = [];
+
+                if (selectionMode && selected.size > 0) {
+                    targetIds = media
+                        .filter(m => selected.has(m.id!) && m.id)
+                        .map(m => m.id!);
+                } else if (!selectionMode && focusedId) {
+                    const item = media.find(m => m.id === focusedId);
+                    if (item && item.id) targetIds = [item.id];
+                }
+
+                if (targetIds.length > 0) {
+                    if (activeFolderId) requestRemoveFromFolder(targetIds);
+                    else requestDelete(targetIds);
+                }
+                return;
+            }
+
+            // 3. GRID NAVIGATION (Arrows / Enter)
+            if (media.length === 0) return;
+
+            // Helper to scroll/focus
+            const focusCard = (card: HTMLElement) => {
+                const newId = card.getAttribute('data-id');
+                if (newId) {
+                    setFocusedId(newId);
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    card.focus();
+                }
+            };
+
+            const grid = gridRef.current;
+            if (!grid) return;
+            const cards = Array.from(grid.querySelectorAll<HTMLElement>('[data-id]'));
+            if (cards.length === 0) return;
+
+            // Find current focused index
+            let currentIndex = focusedId 
+                ? cards.findIndex(c => c.getAttribute('data-id') === focusedId)
+                : -1;
+
+            if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                if (currentIndex === -1) focusCard(cards[0]);
+                else if (currentIndex < cards.length - 1) focusCard(cards[currentIndex + 1]);
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                if (currentIndex === -1) focusCard(cards[cards.length - 1]);
+                else if (currentIndex > 0) focusCard(cards[currentIndex - 1]);
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (currentIndex === -1) {
+                    focusCard(cards[0]);
+                } else {
+                    const currentRect = cards[currentIndex].getBoundingClientRect();
+                    const candidates = cards.filter(c => c.getBoundingClientRect().top > currentRect.top + 10);
+                    
+                    if (candidates.length > 0) {
+                        // 1. Identify the visual row immediately below
+                        // Since DOM order usually follows layout, candidates[0] is the top-left-most item below.
+                        const nextRowTop = candidates[0].getBoundingClientRect().top;
+                        
+                        // 2. Filter for items in that specific row
+                        const nextRowItems = candidates.filter(c => Math.abs(c.getBoundingClientRect().top - nextRowTop) < 10);
+                        
+                        // 3. Sort by horizontal proximity to current item's center
+                        const currentCenter = currentRect.left + currentRect.width / 2;
+                        nextRowItems.sort((a, b) => {
+                            const ra = a.getBoundingClientRect();
+                            const rb = b.getBoundingClientRect();
+                            const da = Math.abs((ra.left + ra.width / 2) - currentCenter);
+                            const db = Math.abs((rb.left + rb.width / 2) - currentCenter);
+                            return da - db;
+                        });
+                        
+                        focusCard(nextRowItems[0]);
+                    }
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (currentIndex === -1) {
+                    focusCard(cards[cards.length - 1]);
+                } else {
+                    const currentRect = cards[currentIndex].getBoundingClientRect();
+                    const candidates = cards.filter(c => c.getBoundingClientRect().top < currentRect.top - 10);
+                    if (candidates.length > 0) {
+                        const currentCenter = currentRect.left + currentRect.width / 2;
+                        // For Up, we want the bottom-most of the candidates (closest to current)
+                        candidates.sort((a, b) => {
+                            const ra = a.getBoundingClientRect();
+                            const rb = b.getBoundingClientRect();
+                            // Sort by vertical position (descending / larger top) first
+                            const vDiff = rb.top - ra.top;
+                            if (Math.abs(vDiff) > 10) return vDiff;
+                            // Then horizontal
+                            const da = Math.abs((ra.left + ra.width / 2) - currentCenter);
+                            const db = Math.abs((rb.left + rb.width / 2) - currentCenter);
+                            return da - db;
+                        });
+                        focusCard(candidates[0]);
+                    }
+                }
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (focusedId) {
+                    setSearchParams(prev => {
+                        const next = new URLSearchParams(prev);
+                        next.set('media', focusedId);
+                        return next;
+                    });
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [
+        isActive, 
+        selectionMode, 
+        selected, 
+        media, 
+        focusedId, 
+        activeFolderId, 
+        // Dialog/Modal states
+        pendingDeleteIds,
+        pendingRemoveFromFolderIds,
+        showBatchTagModal,
+        showStartAutoTagConfirm,
+        showCancelAutoTagConfirm,
+        showClearTagsConfirm,
+        autoTagResult,
+        selectedMediaId,
+        standaloneItem,
+        groups,
+        isGrouped,
+        // Actions
+        exitSelectionMode,
+        setSelectionMode,
+        setSelected,
+        requestDelete,
+        requestRemoveFromFolder,
+        setSearchParams
+    ]);
+
+    // Ensure DOM focus follows React state
+    useEffect(() => {
+        if (focusedId && !selectionMode && isActive && !selectedMediaId && gridRef.current) {
+            // Use a small timeout to allow layout to settle if needed, or run immediately
+            // requestAnimationFrame is often better for "after render" focus
+            requestAnimationFrame(() => {
+                const card = gridRef.current?.querySelector<HTMLElement>(`[data-id="${focusedId}"]`);
+                if (card && document.activeElement !== card) {
+                    card.focus({ preventScroll: true }); // Prevent unwanted scrolling, we handle it manually
+                }
+            });
+        }
+    }, [focusedId, selectionMode, isActive, selectedMediaId]);
 
 
 
@@ -1122,104 +1315,7 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
 
 
 
-    // --- Keyboard navigation (arrow keys + Enter) - only when modal is NOT open ---
-    const handleGridKeyDown = useCallback((e: KeyboardEvent) => {
-        // Don't handle if view is inactive, modal is open, or sub-picker is open
-        if (!isActive || selectedMediaId || showPicker) return;
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
 
-        const currentMedia = isGrouped ? groups.flatMap(g => g.items) : mediaRef.current;
-        if (currentMedia.length === 0) return;
-
-        // Get all cards in the DOM to perform geometric navigation
-        const grid = gridRef.current;
-        if (!grid) return;
-        const cards = Array.from(grid.querySelectorAll<HTMLElement>('[data-id]'));
-        if (cards.length === 0) return;
-
-        // Find current focused element
-        let currentCardIdx = focusedId 
-            ? cards.findIndex(c => c.getAttribute('data-id') === focusedId)
-            : -1;
-        
-        let newCard: HTMLElement | null = null;
-
-        if (e.key === 'ArrowRight') {
-            e.preventDefault();
-            if (currentCardIdx === -1) {
-                newCard = cards[0];
-            } else if (currentCardIdx < cards.length - 1) {
-                newCard = cards[currentCardIdx + 1];
-            }
-        } else if (e.key === 'ArrowLeft') {
-            e.preventDefault();
-            if (currentCardIdx === -1) {
-                newCard = cards[cards.length - 1];
-            } else if (currentCardIdx > 0) {
-                newCard = cards[currentCardIdx - 1];
-            }
-        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            e.preventDefault();
-            if (currentCardIdx === -1) {
-                newCard = e.key === 'ArrowDown' ? cards[0] : cards[cards.length - 1];
-            } else {
-                const currentRect = cards[currentCardIdx].getBoundingClientRect();
-                const currentCenterX = currentRect.left + currentRect.width / 2;
-                
-                // Find candidates in other rows
-                const candidates = cards.filter(c => {
-                    const r = c.getBoundingClientRect();
-                    if (e.key === 'ArrowDown') {
-                        return r.top > currentRect.top + 10; // Below current row
-                    } else {
-                        return r.top < currentRect.top - 10; // Above current row
-                    }
-                });
-
-                if (candidates.length > 0) {
-                    // Sort by vertical distance first, then horizontal distance from center
-                    candidates.sort((a, b) => {
-                        const ra = a.getBoundingClientRect();
-                        const rb = b.getBoundingClientRect();
-                        const distY = Math.abs(ra.top - currentRect.top) - Math.abs(rb.top - currentRect.top);
-                        if (Math.abs(distY) > 20) return distY; // Significant vertical difference
-                        
-                        const centerA = ra.left + ra.width / 2;
-                        const centerB = rb.left + rb.width / 2;
-                        return Math.abs(centerA - currentCenterX) - Math.abs(centerB - currentCenterX);
-                    });
-                    newCard = candidates[0];
-                }
-            }
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (focusedId) {
-                setSearchParams(prev => {
-                    const next = new URLSearchParams(prev);
-                    next.set('media', focusedId);
-                    return next;
-                });
-            }
-            return;
-        } else {
-            return;
-        }
-
-        if (newCard) {
-            const newId = newCard.getAttribute('data-id');
-            if (newId) {
-                setFocusedId(newId);
-                newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                newCard.focus();
-            }
-        }
-    }, [focusedId, selectedMediaId, showPicker, isGrouped, groups, setSearchParams, isActive]);
-
-    useEffect(() => {
-        window.addEventListener('keydown', handleGridKeyDown);
-        return () => window.removeEventListener('keydown', handleGridKeyDown);
-    }, [handleGridKeyDown]);
 
     // --- Track last viewed item in modal and sync focus when modal closes ---
     const prevSelectedMediaIdRef = useRef<string | null>(null);
@@ -1409,41 +1505,7 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
         };
     }, [getScrollParent, getCardsInRect]);
 
-    // Keyboard shortcuts (Ctrl+A to select all, Delete to remove/delete)
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            // Check if the user is typing in an input/textarea
-            const target = e.target as HTMLElement;
-            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-                return;
-            }
 
-            // Ctrl+A or Cmd+A (Select All)
-            if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-                e.preventDefault();
-                if (media.length > 0) {
-                    if (!selectionMode) setSelectionMode(true);
-                    const allIds = new Set(media.filter(m => m.id).map(m => m.id!));
-                    setSelected(allIds);
-                }
-            }
-
-            // Delete key
-            if (e.key === 'Delete' || e.key === 'Backspace') {
-                if (selectionMode && selected.size > 0) {
-                    e.preventDefault();
-                    if (activeFolderId) {
-                        handleRemoveFromFolder();
-                    } else {
-                        handleBatchDelete();
-                    }
-                }
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [media, selectionMode, selected, activeFolderId, handleRemoveFromFolder, handleBatchDelete]);
 
     useImperativeHandle(ref, () => ({
         handleUpload
@@ -2108,7 +2170,12 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
                     {/* Remove from folder (only when viewing a folder) */}
                     {activeFolderId && (
                                 <button
-                                    onClick={() => handleRemoveFromFolder()}
+                                    onClick={() => {
+                                        const ids = media
+                                            .filter(m => selected.has(m.id!) && m.id)
+                                            .map(m => m.id!);
+                                        requestRemoveFromFolder(ids);
+                                    }}
                                     disabled={isDeleting}
                                     className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 transition-colors"
                                 >
@@ -2134,7 +2201,12 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
 
                     {/* Delete */}
                     <button
-                        onClick={() => handleBatchDelete()}
+                        onClick={() => {
+                            const ids = media
+                                .filter(m => selected.has(m.id!) && m.id)
+                                .map(m => m.id!);
+                            requestDelete(ids);
+                        }}
                         disabled={isDeleting}
                         className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
                     >
@@ -2365,25 +2437,25 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
             />
 
             <ConfirmDialog
-                isOpen={showBatchDeleteConfirm}
+                isOpen={!!pendingDeleteIds}
                 title="Delete Media?"
-                message={`Are you sure you want to delete ${selected.size} items? This will permanently remove the original files and thumbnails.`}
+                message={`Are you sure you want to delete ${pendingDeleteIds?.length || 0} items? This will permanently remove the original files and thumbnails.`}
                 confirmLabel="Delete Permanently"
                 cancelLabel="Cancel"
                 isDestructive={true}
-                onConfirm={() => handleBatchDelete(true)}
-                onCancel={() => setShowBatchDeleteConfirm(false)}
+                onConfirm={confirmDelete}
+                onCancel={() => setPendingDeleteIds(null)}
             />
 
             <ConfirmDialog
-                isOpen={showRemoveFromFolderConfirm}
+                isOpen={!!pendingRemoveFromFolderIds}
                 title="Remove from Folder?"
-                message={`Remove ${selected.size} items from "${activeFolderName}"? The media items will remain in your gallery.`}
+                message={`Remove ${pendingRemoveFromFolderIds?.length || 0} items from "${activeFolderName}"? The media items will remain in your gallery.`}
                 confirmLabel="Remove"
                 cancelLabel="Cancel"
                 isDestructive={true}
-                onConfirm={() => handleRemoveFromFolder(true)}
-                onCancel={() => setShowRemoveFromFolderConfirm(false)}
+                onConfirm={confirmRemoveFromFolder}
+                onCancel={() => setPendingRemoveFromFolderIds(null)}
             />
 
             {/* Auto Tag Result Dialog */}

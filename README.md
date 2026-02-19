@@ -12,7 +12,7 @@
   <a href="https://teamcity.sedrad.com/viewType.html?buildTypeId=GalleryNet_Build&guest=1">
     <img src="https://teamcity.sedrad.com/app/rest/builds/buildType:(id:GalleryNet_Build)/statusIcon" alt="Build Status">
   </a>
-  <img src="https://img.shields.io/badge/tests-101-brightgreen?style=flat-square&logo=checkmarx&logoColor=white" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-107-brightgreen?style=flat-square&logo=checkmarx&logoColor=white" alt="Tests">
 
   <a href="https://hub.docker.com/r/sedrad/gallerynet/tags">
     <img src="https://img.shields.io/docker/image-size/sedrad/gallerynet/v1?style=flat-square&logo=docker&logoColor=white&label=docker%20image%20size" alt="Docker Size">

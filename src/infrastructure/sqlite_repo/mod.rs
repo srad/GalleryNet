@@ -1,4 +1,5 @@
 mod embeddings;
+mod faces;
 mod folders;
 mod media;
 mod tags;
@@ -64,6 +65,31 @@ impl SqliteRepository {
             [],
         )
         .map_err(|e| DomainError::Database(format!("Failed to create vec_media table: {}", e)))?;
+
+        println!("Ensuring faces table exists...");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS faces (
+                id BLOB PRIMARY KEY,
+                media_id BLOB NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                box_x1 INTEGER NOT NULL,
+                box_y1 INTEGER NOT NULL,
+                box_x2 INTEGER NOT NULL,
+                box_y2 INTEGER NOT NULL,
+                cluster_id INTEGER
+            )",
+            [],
+        )
+        .map_err(|e| DomainError::Database(format!("Failed to create faces table: {}", e)))?;
+
+        println!("Ensuring vec_faces virtual table exists...");
+        // Using 512-d for ArcFace (w600k_mbf)
+        conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS vec_faces USING vec0(
+                embedding float[512] distance_metric=cosine
+            )",
+            [],
+        )
+        .map_err(|e| DomainError::Database(format!("Failed to create vec_faces table: {}", e)))?;
 
         println!("Ensuring folders table exists...");
         // Virtual folders
@@ -510,6 +536,32 @@ impl MediaRepository for SqliteRepository {
 
     fn find_media_without_phash(&self) -> Result<Vec<MediaItem>, DomainError> {
         self.find_media_without_phash_impl()
+    }
+
+    fn save_faces(
+        &self,
+        media_id: uuid::Uuid,
+        faces: &[crate::domain::Face],
+        embeddings: &[Vec<f32>],
+    ) -> Result<(), DomainError> {
+        self.save_faces_impl(media_id, faces, embeddings)
+    }
+
+    fn get_all_face_embeddings(
+        &self,
+    ) -> Result<Vec<(uuid::Uuid, uuid::Uuid, Vec<f32>)>, DomainError> {
+        self.get_all_face_embeddings_impl()
+    }
+
+    fn update_face_clusters(
+        &self,
+        face_ids_with_clusters: &[(uuid::Uuid, i64)],
+    ) -> Result<(), DomainError> {
+        self.update_face_clusters_impl(face_ids_with_clusters)
+    }
+
+    fn get_face_groups(&self) -> Result<Vec<crate::domain::FaceGroup>, DomainError> {
+        self.get_face_groups_impl()
     }
 }
 

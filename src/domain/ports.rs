@@ -17,6 +17,8 @@ pub enum DomainError {
     NotFound,
     #[error("Model loading error: {0}")]
     ModelLoad(String),
+    #[error("Network error: {0}")]
+    Network(String),
 }
 
 impl From<rusqlite::Error> for DomainError {
@@ -150,10 +152,25 @@ pub trait MediaRepository: Send + Sync {
     fn get_manual_positives(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError>;
     fn get_all_ids_with_tag(&self, tag_id: i64) -> Result<Vec<uuid::Uuid>, DomainError>;
     fn find_media_without_phash(&self) -> Result<Vec<MediaItem>, DomainError>;
+
+    // --- Face operations ---
+    fn save_faces(&self, media_id: uuid::Uuid, faces: &[super::models::Face], embeddings: &[Vec<f32>]) -> Result<(), DomainError>;
+    fn get_all_face_embeddings(&self) -> Result<Vec<(uuid::Uuid, uuid::Uuid, Vec<f32>)>, DomainError>;
+    fn update_face_clusters(&self, face_ids_with_clusters: &[(uuid::Uuid, i64)]) -> Result<(), DomainError>;
+    fn get_face_groups(&self) -> Result<Vec<super::models::FaceGroup>, DomainError>;
+}
+
+pub struct DetectedFace {
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32,
+    pub embedding: Vec<f32>,
 }
 
 pub trait AiProcessor: Send + Sync {
     fn extract_features(&self, image_bytes: &[u8]) -> Result<Vec<f32>, DomainError>;
+    fn detect_and_extract_faces(&self, image_bytes: &[u8]) -> Result<Vec<DetectedFace>, DomainError>;
 }
 
 pub trait HashGenerator: Send + Sync {

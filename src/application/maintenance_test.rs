@@ -13,6 +13,9 @@ mod tests {
         fn extract_features(&self, _image_data: &[u8]) -> Result<Vec<f32>, DomainError> {
             Ok(vec![0.1; 1280])
         }
+        fn detect_and_extract_faces(&self, _image_bytes: &[u8]) -> Result<Vec<crate::domain::DetectedFace>, DomainError> {
+            Ok(vec![])
+        }
     }
 
     // Mock Hash Generator

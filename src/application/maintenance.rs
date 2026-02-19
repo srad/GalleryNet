@@ -1,7 +1,8 @@
-use crate::domain::{AiProcessor, DomainError, HashGenerator, MediaRepository, MediaItem};
+use crate::domain::{AiProcessor, DomainError, HashGenerator, MediaRepository, MediaItem, Face};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
+use uuid::Uuid;
 
 use super::processor;
 
@@ -83,7 +84,7 @@ impl FixThumbnailsUseCase {
             }
 
             // Extract features
-            let features = processed.feature_input.and_then(|bytes| self.ai.extract_features(&bytes).ok());
+            let features = processed.feature_input.as_ref().and_then(|bytes| self.ai.extract_features(bytes).ok());
 
             // Update Media Item with new data
             media.phash = processed.phash;
@@ -98,6 +99,31 @@ impl FixThumbnailsUseCase {
             if let Err(e) = self.repo.update_media_and_vector(&media, features.as_deref()) {
                 println!("Failed to update database for {}: {}", media.id, e);
                 continue;
+            }
+
+            // Detect and save faces
+            if let Some(bytes) = processed.feature_input.as_ref() {
+                if let Ok(detected) = self.ai.detect_and_extract_faces(bytes) {
+                    let mut face_models = Vec::with_capacity(detected.len());
+                    let mut face_embeddings = Vec::with_capacity(detected.len());
+
+                    for f in detected {
+                        face_models.push(crate::domain::Face {
+                            id: Uuid::new_v4(),
+                            media_id: media.id,
+                            box_x1: f.x1,
+                            box_y1: f.y1,
+                            box_x2: f.x2,
+                            box_y2: f.y2,
+                            cluster_id: None,
+                        });
+                        face_embeddings.push(f.embedding);
+                    }
+
+                    if !face_models.is_empty() {
+                        let _ = self.repo.save_faces(media.id, &face_models, &face_embeddings);
+                    }
+                }
             }
 
             fixed_items.push(media);

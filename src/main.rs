@@ -15,7 +15,7 @@ use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use infrastructure::{SqliteRepository, OrtProcessor, PhashGenerator};
-use application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, TagLearningUseCase, FixThumbnailsUseCase};
+use application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, GroupFacesUseCase, TagLearningUseCase, FixThumbnailsUseCase, ExternalSearchUseCase};
 use presentation::{AppState, AuthConfig, app_router};
 
 use tower_http::services::{ServeDir, ServeFile};
@@ -112,6 +112,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repo.clone(),
     ));
 
+    let group_faces_use_case = Arc::new(GroupFacesUseCase::new(
+        repo.clone(),
+    ));
+
     let tag_learning_use_case = Arc::new(TagLearningUseCase::new(
         repo.clone(),
     ));
@@ -122,6 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         hasher.clone(),
         upload_dir.clone(),
         thumbnail_dir.clone(),
+    ));
+
+    let external_search_use_case = Arc::new(ExternalSearchUseCase::new(
+        repo.clone(),
+        upload_dir.clone(),
     ));
 
     let (tx, _) = tokio::sync::broadcast::channel(100);
@@ -140,8 +149,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         list_use_case,
         delete_use_case,
         group_use_case,
+        group_faces_use_case,
         tag_learning_use_case,
         fix_thumbnails_use_case,
+        external_search_use_case,
         repo: repo.clone(),
         upload_dir: upload_dir.clone(),
         auth_config: auth_config.clone(),

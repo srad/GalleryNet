@@ -5,7 +5,6 @@ import { fireMediaUpdate } from '../events';
 
 import { HeartIcon, TagIcon, SearchIcon } from './Icons';
 import TagInput from './TagInput';
-import ConfirmDialog from './ConfirmDialog';
 import LoadingIndicator from './LoadingIndicator';
 
 interface MediaModalProps {
@@ -51,6 +50,26 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
     const [exifOpen, setExifOpen] = useState(false);
     const [prevId, setPrevId] = useState(item.id);
     const videoRef = useRef<HTMLVideoElement>(null);
+    const [toastMessage, setToastMessage] = useState<string | null>(null);
+    const [isSearching, setIsSearching] = useState(false);
+
+    const handleSearchImage = useCallback(async () => {
+        if (!item.id) return;
+        setIsSearching(true);
+        try {
+            const searchResultUrl = await apiClient.searchExternal(item.id);
+            // Open the search result page directly
+            window.open(searchResultUrl, "_blank");
+            setToastMessage("Opened Yandex Images in new tab.");
+            setTimeout(() => setToastMessage(null), 3000);
+        } catch (e) {
+            console.error("Failed to search external", e);
+            setToastMessage("Search failed. Server error.");
+            setTimeout(() => setToastMessage(null), 3000);
+        } finally {
+            setIsSearching(false);
+        }
+    }, [item.id]);
 
     // Initial volume from localStorage
     useEffect(() => {
@@ -206,6 +225,13 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
             onTouchEnd={handleTouchEnd}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
         >
+            {/* Toast Notification */}
+            {toastMessage && (
+                <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 bg-black/80 text-white text-sm rounded-full shadow-lg backdrop-blur-md animate-fade-in-down border border-white/10 text-center">
+                    {toastMessage}
+                </div>
+            )}
+
             {/* Mobile Toolbar */}
             <div className="lg:hidden absolute top-3 left-3 z-50 flex flex-row gap-4">
                 {onToggleFavorite && (
@@ -222,6 +248,22 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                         className="w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 backdrop-blur-md transition-colors"
                     >
                         <SearchIcon className="w-6 h-6" />
+                    </button>
+                )}
+                {!video && (
+                    <button
+                        onClick={handleSearchImage}
+                        disabled={isSearching}
+                        className={`w-10 h-10 flex items-center justify-center rounded-full bg-black/40 text-white/80 hover:text-white hover:bg-black/60 backdrop-blur-md transition-colors ${isSearching ? 'cursor-wait opacity-70' : ''}`}
+                        title="Search with Yandex Images"
+                    >
+                         {isSearching ? (
+                            <LoadingIndicator size="sm" color="text-white" />
+                         ) : (
+                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S12 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S12 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+                            </svg>
+                         )}
                     </button>
                 )}
                 <a 
@@ -418,6 +460,25 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
                                 </svg>
                                 Find Similar
+                            </button>
+                        )}
+
+                        {/* Search Image Button */}
+                        {!video && (
+                            <button
+                                onClick={handleSearchImage}
+                                disabled={isSearching}
+                                className={`flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium rounded-lg bg-blue-500/20 text-blue-100 hover:bg-blue-500/30 hover:text-white transition-colors border border-blue-500/30 ${isSearching ? 'cursor-wait opacity-70' : ''}`}
+                                title="Search with Yandex Images"
+                            >
+                                {isSearching ? (
+                                    <LoadingIndicator size="sm" color="text-white" />
+                                ) : (
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S12 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S12 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+                                    </svg>
+                                )}
+                                Search with Yandex
                             </button>
                         )}
 

@@ -66,6 +66,8 @@
 
 - **Visual Search** &mdash; Find similar photos and videos by uploading a reference image, with adjustable similarity
   threshold and one-click grouping
+- **Face Recognition & Grouping** &mdash; Automatically detect faces in your library and group them into people clusters with adjustable confidence
+- **External Image Search** &mdash; Search for any image in your library using Yandex Images via a secure server-side proxy (no public URL leaks)
 - **Auto Tagging** &mdash; Tag a few items in the library and let the AI automatically label matching items across your
   library
 - **Duplicate Detection** &mdash; Duplicates are detected during upload and silently skipped
@@ -94,6 +96,8 @@
 |---------------------|--------------------------------------------------------------------------------------------------------------------------------------|
 | Visual Search       | MobileNetV3-Large extracts 1280-dim feature vectors; cosine similarity via [sqlite-vec](https://github.com/asg017/sqlite-vec)        |
 | Similarity Grouping | Agglomerative clustering over the same embedding space with a user-adjustable distance threshold                                     |
+| Face Detection      | UltraFace-Slim identifies face bounding boxes in photos and video frames                                                             |
+| Face Recognition    | ArcFace (MobileFaceNet) extracts 512-dim face embeddings for robust person grouping                                                  |
 | Auto-Tagging        | Linear SVM with Platt-calibrated probabilities trained on user-provided examples via [linfa-svm](https://crates.io/crates/linfa-svm) |
 | Duplicate Detection | Perceptual hashing ([image_hasher](https://crates.io/crates/image_hasher)) compared at upload time                                   |
 | Video Processing    | ffmpeg `thumbnail` filter selects visually distinct frames for thumbnails, hashing, and embeddings                                   |
@@ -217,8 +221,11 @@ src/
 |----------|-----------------------------------|--------------------------------------------------------------------------------------|
 | `POST`   | `/api/upload`                     | Upload media (multipart). Returns `MediaItem`. 409 for duplicates                    |
 | `POST`   | `/api/search`                     | Visual similarity search. Multipart with `file` + `similarity`                       |
+| `POST`   | `/api/media/group`                 | Group all media by visual similarity. Body: `{"similarity": 80}`                     |
+| `POST`   | `/api/media/faces/group`           | Group all media by detected faces. Body: `{"similarity": 60}`                        |
 | `GET`    | `/api/media`                      | Paginated media list. Params: `page`, `limit`, `media_type`, `sort`                  |
 | `GET`    | `/api/media/{id}`                 | Get single media item with EXIF data                                                 |
+| `POST`   | `/api/media/{id}/search-external` | Trigger server-side external image search (Yandex)                                   |
 | `POST`   | `/api/media/{id}/favorite`        | Toggle favorite status. Body: `{"favorite": true/false}`                             |
 | `DELETE` | `/api/media/{id}`                 | Delete single media item                                                             |
 | `POST`   | `/api/media/batch-delete`         | Batch delete. Body: `["uuid1", ...]`                                                 |

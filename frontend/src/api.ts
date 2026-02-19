@@ -197,6 +197,18 @@ export class ApiClient {
         return res.json();
     }
 
+    async getFaceGroups(params: {
+        similarity: number;
+    }): Promise<MediaGroup[]> {
+        const res = await apiFetch(this.getUrl('/api/media/faces/group'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
+        });
+        if (!res.ok) throw new Error('Failed to fetch face groups');
+        return res.json();
+    }
+
     async toggleFavorite(id: string, favorite: boolean): Promise<void> {
         const res = await apiFetch(this.getUrl(`/api/media/${id}/favorite`), {
             method: 'POST',
@@ -300,6 +312,15 @@ export class ApiClient {
         });
         if (!res.ok) throw new Error('Search failed');
         return res.json();
+    }
+
+    async searchExternal(id: string): Promise<string> {
+        const res = await apiFetch(this.getUrl(`/api/media/${id}/search-external`), {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error('External search failed');
+        const data = await res.json();
+        return data.url;
     }
 }
 

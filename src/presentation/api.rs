@@ -27,8 +27,9 @@ use uuid::Uuid;
 use tokio::io::AsyncWriteExt;
 
 use crate::application::{
-    DeleteMediaUseCase, FixThumbnailsUseCase, GroupMediaUseCase, ListMediaUseCase,
-    SearchSimilarUseCase, TagLearningUseCase, UploadMediaUseCase,
+    DeleteMediaUseCase, ExternalSearchUseCase, FixThumbnailsUseCase, GroupFacesUseCase,
+    GroupMediaUseCase, ListMediaUseCase, SearchSimilarUseCase, TagLearningUseCase,
+    UploadMediaUseCase,
 };
 use crate::domain::{DomainError, MediaItem, MediaRepository};
 use crate::presentation::auth::AuthConfig;
@@ -95,8 +96,10 @@ pub struct AppState {
     pub list_use_case: Arc<ListMediaUseCase>,
     pub delete_use_case: Arc<DeleteMediaUseCase>,
     pub group_use_case: Arc<GroupMediaUseCase>,
+    pub group_faces_use_case: Arc<GroupFacesUseCase>,
     pub tag_learning_use_case: Arc<TagLearningUseCase>,
     pub fix_thumbnails_use_case: Arc<FixThumbnailsUseCase>,
+    pub external_search_use_case: Arc<ExternalSearchUseCase>,
     pub repo: Arc<dyn MediaRepository>,
     pub upload_dir: PathBuf,
     pub auth_config: Option<AuthConfig>,
@@ -239,6 +242,7 @@ impl IntoResponse for DomainError {
             DomainError::Hashing(e) => error!("Hashing Error: {}", e),
             DomainError::Io(e) => error!("IO Error: {}", e),
             DomainError::ModelLoad(e) => error!("Model Load Error: {}", e),
+            DomainError::Network(e) => error!("Network Error: {}", e),
         }
 
         let (status, message) = match self {
@@ -257,6 +261,7 @@ impl IntoResponse for DomainError {
                 }
             },
             DomainError::ModelLoad(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string()),
+            DomainError::Network(_) => (StatusCode::BAD_GATEWAY, "External service error".to_string()),
         };
 
 
@@ -284,9 +289,11 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media/download/plan", post(batch_download_plan_handler))
         .route("/media/download/stream/{part_id}", get(batch_download_stream_handler))
         .route("/media/group", post(group_media_handler))
+        .route("/media/faces/group", post(group_faces_handler))
         .route("/media/fix-thumbnails", post(fix_thumbnails_handler))
 
         .route("/media/{id}", get(get_media_handler).delete(delete_handler))
+        .route("/media/{id}/search-external", post(external_search_handler))
         .route("/media/{id}/favorite", post(toggle_favorite_handler))
         .route("/media/{id}/tags", put(update_tags_handler))
         .route("/media/batch-tags", put(batch_update_tags_handler))
@@ -688,6 +695,14 @@ async fn search_by_id_handler(
 
     let results = state.search_use_case.execute_by_id(id, limit, max_distance).await?;
     Ok(Json(results))
+}
+
+async fn external_search_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, DomainError> {
+    let url = state.external_search_use_case.execute(id).await?;
+    Ok(Json(json!({ "url": url })))
 }
 
 async fn get_media_handler(
@@ -1275,6 +1290,22 @@ async fn group_media_handler(
     Ok(Json(groups))
 }
 
+#[derive(Deserialize)]
+pub struct FaceGroupRequest {
+    pub similarity: Option<f32>, // 0-100%
+}
+
+async fn group_faces_handler(
+    State(state): State<AppState>,
+    Json(body): Json<FaceGroupRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    let similarity = body.similarity.unwrap_or(60.0);
+    // For MobileFaceNet, dot product (cosine similarity) > 0.6 is a good start
+    let threshold = similarity / 100.0;
+    let groups = state.group_faces_use_case.execute(threshold).await?;
+    Ok(Json(groups))
+}
+
 async fn fix_thumbnails_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, DomainError> {
@@ -1598,6 +1629,9 @@ mod tests {
             group_use_case: Arc::new(crate::application::GroupMediaUseCase::new(
                 Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
             )),
+            group_faces_use_case: Arc::new(crate::application::GroupFacesUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            )),
             tag_learning_use_case: Arc::new(crate::application::TagLearningUseCase::new(
                 Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
             )),
@@ -1607,6 +1641,10 @@ mod tests {
                 Arc::new(crate::infrastructure::PhashGenerator::new()),
                 PathBuf::from("uploads"),
                 PathBuf::from("thumbnails"),
+            )),
+            external_search_use_case: Arc::new(crate::application::ExternalSearchUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                PathBuf::from("uploads"),
             )),
             repo: Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
             upload_dir: PathBuf::from("uploads"),

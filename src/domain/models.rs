@@ -67,6 +67,23 @@ pub struct MediaGroup {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Face {
+    pub id: Uuid,
+    pub media_id: Uuid,
+    pub box_x1: i32,
+    pub box_y1: i32,
+    pub box_x2: i32,
+    pub box_y2: i32,
+    pub cluster_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaceGroup {
+    pub id: i64,
+    pub items: Vec<MediaSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagCount {
     pub name: String,
     pub count: i64,

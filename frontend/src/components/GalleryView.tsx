@@ -179,9 +179,10 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
     }, [sortBy, sortOrder]);
 
     // --- Grouping state ---
-    const [isGrouped, setIsGrouped] = useState(false);
+    const [groupMode, setGroupMode] = useState<'none' | 'similarity' | 'faces'>('none');
     const [groups, setGroups] = useState<MediaGroup[]>([]);
     const [groupSimilarity, setGroupSimilarity] = useState(70);
+    const [faceSimilarity, setFaceSimilarity] = useState(60);
 
     // --- Selective updates from events ---
     useEffect(() => {
@@ -279,6 +280,8 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
     // --- Add-to-folder picker state ---
     const [showFolderPicker, setShowFolderPicker] = useState(false);
     const [isAddingToFolder, setIsAddingToFolder] = useState(false);
+
+    const isGrouped = groupMode !== 'none';
 
     // True while the server is computing similarity groups or processing batch actions
     const isBusy = (isGrouped && isLoading) || isBatchTagging || isDeleting || isAddingToFolder || isAutoTagging;
@@ -459,11 +462,18 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
         setIsLoading(true);
         isLoadingRef.current = true;
         try {
-            const groups = await apiClient.getGroups({
-                folder_id: activeFolderId,
-                similarity: similarityOverride ?? groupSimilarity,
-            });
-            setGroups(groups);
+            if (groupMode === 'similarity') {
+                const groups = await apiClient.getGroups({
+                    folder_id: activeFolderId,
+                    similarity: similarityOverride ?? groupSimilarity,
+                });
+                setGroups(groups);
+            } else if (groupMode === 'faces') {
+                const groups = await apiClient.getFaceGroups({
+                    similarity: similarityOverride ?? faceSimilarity,
+                });
+                setGroups(groups);
+            }
         } catch (e) {
             console.error('Failed to fetch groups:', e);
         } finally {
@@ -471,7 +481,7 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
             isLoadingRef.current = false;
             setInitialLoad(false);
         }
-    }, [activeFolderId, groupSimilarity]);
+    }, [activeFolderId, groupSimilarity, faceSimilarity, groupMode]);
 
 
     // --- Fetch groups when the slider is released (not while dragging) ---
@@ -1725,24 +1735,42 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
 
                         <div className="flex items-center gap-2">
                             <button
-                                onClick={() => setIsGrouped(g => !g)}
+                                onClick={() => setGroupMode(prev => prev === 'similarity' ? 'none' : 'similarity')}
                                 disabled={isBusy}
                                 className={`
                                     flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all active:scale-95
-                                    ${isGrouped
+                                    ${groupMode === 'similarity'
                                         ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
                                         : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                                     }
                                 `}
                                 title="Group similar images"
                             >
-                                <svg className={`w-4 h-4 ${isGrouped ? 'text-purple-600' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <svg className={`w-4 h-4 ${groupMode === 'similarity' ? 'text-purple-600' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
                                 </svg>
                                 <span className="hidden sm:inline">Group</span>
                             </button>
 
-                            {isGrouped && (
+                            <button
+                                onClick={() => setGroupMode(prev => prev === 'faces' ? 'none' : 'faces')}
+                                disabled={isBusy}
+                                className={`
+                                    flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all active:scale-95
+                                    ${groupMode === 'faces'
+                                        ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                                        : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                    }
+                                `}
+                                title="Group by faces"
+                            >
+                                <svg className={`w-4 h-4 ${groupMode === 'faces' ? 'text-blue-600' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                                </svg>
+                                <span className="hidden sm:inline">People</span>
+                            </button>
+
+                            {groupMode === 'similarity' && (
                                 <div className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200">
                                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
                                         Similarity: <span className="text-purple-600">{groupSimilarity}%</span>
@@ -1758,6 +1786,26 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
                                         disabled={isBusy}
                                         className="w-24 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-purple-600 hover:accent-purple-700"
                                         title="Adjust similarity grouping threshold"
+                                    />
+                                </div>
+                            )}
+
+                            {groupMode === 'faces' && (
+                                <div className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200">
+                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                        Similarity: <span className="text-blue-600">{faceSimilarity}%</span>
+                                    </span>
+                                    <input
+                                        type="range"
+                                        min="30"
+                                        max="95"
+                                        value={faceSimilarity}
+                                        onChange={(e) => setFaceSimilarity(Number(e.target.value))}
+                                        onPointerUp={commitGroupSimilarity}
+                                        onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') commitGroupSimilarity(); }}
+                                        disabled={isBusy}
+                                        className="w-24 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700"
+                                        title="Adjust face similarity threshold"
                                     />
                                 </div>
                             )}
@@ -1989,21 +2037,27 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
                         {isLoading && (
                             <LoadingIndicator 
                                 variant="overlay" 
-                                label="Computing similarity groups..." 
-                                color="text-purple-600" 
+                                label={groupMode === 'faces' ? "Grouping people..." : "Computing similarity groups..."} 
+                                color={groupMode === 'faces' ? "text-blue-600" : "text-purple-600"} 
                                 className="pt-32 bg-gray-50/80 dark:bg-gray-900/80"
                             />
                         )}
                         {groups.length === 0 && !isLoading && (
                             <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600">
-                                <p className="text-gray-500 dark:text-gray-400">No similar groups found.</p>
+                                <p className="text-gray-500 dark:text-gray-400">
+                                    {groupMode === 'faces' ? 'No people found in your library.' : 'No similar groups found.'}
+                                </p>
                             </div>
                         )}
                         {groups.map((group) => (
                             <div key={group.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
                                 <div className="flex items-center gap-2 mb-3">
-                                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 px-2.5 py-1 rounded-md">
-                                        Group {group.id + 1}
+                                    <span className={`text-sm font-semibold px-2.5 py-1 rounded-md ${
+                                        groupMode === 'faces' 
+                                            ? 'text-blue-700 dark:text-blue-200 bg-blue-100 dark:bg-blue-900/50' 
+                                            : 'text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700'
+                                    }`}>
+                                        {groupMode === 'faces' ? `Person ${group.id + 1}` : `Group ${group.id + 1}`}
                                     </span>
                                     <span className="text-xs text-gray-500 dark:text-gray-400">
                                         {group.items.length} items

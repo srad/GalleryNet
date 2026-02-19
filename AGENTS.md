@@ -17,21 +17,24 @@ src/
 │   ├── list.rs      # ListMediaUseCase — paginated media listing with optional media_type filter and sort
 │   ├── delete.rs    # DeleteMediaUseCase — single and batch delete (DB + files)
 │   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison (capped at 10k items, 5M edges)
+│   ├── face_group.rs # GroupFacesUseCase — Union-Find clustering of 512-d ArcFace embeddings (capped at 20k faces, 10M edges)
 │   ├── tag_learning.rs # TagLearningUseCase — Linear SVM with class-weighted training (pos_neg_weights), Platt-calibrated probabilities, hard negative mining, outlier filtering
 │   ├── maintenance.rs # FixThumbnailsUseCase — Scans for media with missing phash ('no_hash'), re-generates thumbnails, phash, features, and updates DB
+│   ├── external_search.rs # ExternalSearchUseCase — Server-side proxy for image search (Yandex). Uploads image binary directly to the search engine to avoid public leaks and bypass cookie walls.
 │   └── tasks.rs       # TaskRunner — Background scheduler for internal maintenance and cleanup
 ├── infrastructure/  # Trait implementations (adapters)
 
 │   ├── sqlite_repo/       # SQLite + sqlite-vec (connection pool, split into submodules)
 │   │   ├── mod.rs         # Pool struct, schema init, trait impl delegation, tag helpers
 │   │   ├── media.rs       # CRUD: save, find, delete, list, counts, favorites
+│   │   ├── faces.rs       # Face operations: save detections, retrieve embeddings, cluster management
 │   │   ├── folders.rs     # Folder operations: create, list, delete, rename, reorder, media membership
 │   │   ├── tags.rs        # Tag operations: CRUD, auto-tag management, tag model persistence (Platt coefficients)
 │   │   └── embeddings.rs  # Vector embedding retrieval: all embeddings, random sampling, KNN nearest neighbors
 │   ├── ort_processor.rs   # MobileNetV3 ONNX inference via ort crate (session pool)
 │   └── phash_generator.rs # Perceptual hashing for duplicate detection
 ├── presentation/    # HTTP layer
-│   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, fix-thumbnails, batch-download (streaming), stats, login/logout, folders. Rate limiting, filename sanitization, error message sanitization, part-based zip splitting.
+│   ├── api.rs       # Axum handlers: upload, search, list, get, delete, batch-delete, fix-thumbnails, external-search, batch-download (streaming), stats, login/logout, folders. Rate limiting, filename sanitization, error message sanitization, part-based zip splitting.
 │   └── auth.rs      # Authentication middleware, AuthConfig, HMAC token generation/verification, constant-time password comparison, session generation counter for invalidation
 ├── events.ts            # Application-wide selective media update bus (zero-latency local sync)
 ├── useWebSocket.ts      # WebSocket connection manager — heartbeat, reconnection jitter, lag recovery
@@ -58,6 +61,14 @@ src/
 - Output: 1280-dimensional feature vector
 - Preprocessing in `ort_processor.rs`: center crop to square → resize 224x224 → normalize → CHW tensor
 - ONNX model lives at `assets/models/mobilenetv3.onnx`, exported via `scripts/mobilenetv3_export.py`
+
+### Face Processing Pipeline
+- **Detection**: UltraFace-Slim (`version-slim-320.onnx`)
+- **Recognition**: ArcFace Mobile (`w600k_mbf.onnx`)
+- **Output**: 512-dimensional feature vector per face
+- **Clustering**: Union-Find algorithm over the 512-d face embedding space
+- **Persistence**: Face bounding boxes and embeddings stored in `faces` and `vec_faces` (sqlite-vec) tables respectively.
+- **Auto-Detection**: Scanned during upload and thumbnail maintenance tasks.
 
 ### Vector Storage & Similarity Search
 - sqlite-vec virtual table with **cosine distance** metric (`distance_metric=cosine`)
@@ -116,6 +127,23 @@ CREATE VIRTUAL TABLE vec_media USING vec0(
     embedding float[1280] distance_metric=cosine
 );
 -- Linked to media via rowid
+
+-- Faces
+CREATE TABLE faces (
+    id BLOB PRIMARY KEY,        -- UUID bytes
+    media_id BLOB NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    box_x1 INTEGER NOT NULL,
+    box_y1 INTEGER NOT NULL,
+    box_x2 INTEGER NOT NULL,
+    box_y2 INTEGER NOT NULL,
+    cluster_id INTEGER          -- result of Union-Find clustering
+);
+
+-- Face Vector index (cosine distance)
+CREATE VIRTUAL TABLE vec_faces USING vec0(
+    embedding float[512] distance_metric=cosine
+);
+-- Linked to faces via rowid
 
 -- Virtual folders
 CREATE TABLE folders (
@@ -210,6 +238,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `POST /api/upload` — Multipart file upload (single or multiple files, max 1000 per request). Only allowed extensions (jpg, jpeg, png, gif, webp, bmp, tiff, tif, heic, heif, avif, mp4, mov, avi, mkv, webm). Single file returns `MediaItem` JSON. Multiple files returns array of `{media, error, filename}` results. Streams to temp file to avoid memory buffering. Image decode limits (10k×10k px, 400MB alloc) prevent pixel bombs. HTTP 409 for duplicates.
 - `POST /api/search` — Multipart with `file` (image) and `similarity` (0-100). Returns array of `MediaItem`.
 - `POST /api/media/group` — Group media by similarity. JSON body `{"folder_id": "...", "similarity": 80}`. Returns array of `MediaGroup` (groups of items).
+- `POST /api/media/faces/group` — Group media by faces. JSON body `{"similarity": 60}`. Returns array of `FaceGroup`.
 - `GET /api/tags` — List all unique tags.
 - `GET /api/tags/count?folder_id=...` — Count auto-tags in current view.
 - `POST /api/tags/learn` — Learn from manual tags. JSON body `{"tag_name":"..."}`. Trains a linear SVM on all manual positives for the tag, computes Platt calibration, and auto-tags the entire library.
@@ -249,6 +278,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - **Media type filter**: Segmented button (All / Photos / Videos) triggers route-based re-fetch with `media_type` query param. Resets pagination on change. Persisted to `localStorage`.
 - **Sort order**: Dropdown menu with four options (Newest, Oldest, Largest, Smallest) sends `sort=asc|desc` and `sort_by=date|size` to API. Both field and direction are persisted to `localStorage`.
 - **Group by Similarity**: Toggle button switches view to grouped mode. Fetches clusters from `/api/media/group`. Includes a similarity slider (50-99%) that fires on pointer release. Shows a standardized `LoadingIndicator` overlay while processing.
+- **Group by Faces**: Toggle button switches view to "People" mode. Fetches face-based clusters from `/api/media/faces/group`. Uses a specialized 512-d ArcFace embedding space. Includes a confidence slider (30-95%) for cluster strictness.
 - **Standardized Loading**: Global `LoadingIndicator.tsx` provides consistent visual feedback for initial app load, pagination, similarity search, and batch actions.
 - **Virtual folders**: Organizational folders (many-to-many relationship with media). Sidebar shows folder list with Link-based navigation. Features an "Add from Library" button that opens a `LibraryPicker` modal. `LibraryPicker` supports a `singleSelect` mode specifically for choosing search references. Folders are drag-to-reorder via native HTML5 drag-and-drop. Supports **drag-and-drop of media items** directly from the gallery or search results into folders, with a success checkmark confirmation.
 - **Keyboard Shortcuts**: Native-like gallery experience with `Ctrl+A` (or `Cmd+A`) to select all loaded items, and `Delete` (or `Backspace`) to trigger batch deletion or removal from the current folder. Shortcuts are automatically disabled when typing in inputs.

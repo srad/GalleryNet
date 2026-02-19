@@ -45,6 +45,7 @@ export function LibraryPicker({ onPick, onCancel, refreshKey, folders, onFolders
             </div>
             <main className="flex-1 overflow-y-auto">
                 <GalleryView
+                    isActive={true}
                     filter={filter}
                     onFilterChange={setFilter}
                     refreshKey={refreshKey}
@@ -83,6 +84,8 @@ interface GalleryViewProps {
     favoritesOnly?: boolean;
     singleSelect?: boolean;
     onLogout?: () => void;
+    /** Whether this view is currently visible and active */
+    isActive?: boolean;
 }
 
 type SortOrder = 'desc' | 'asc';
@@ -104,7 +107,7 @@ const FILTERS: { value: MediaFilter; label: string }[] = [
     { value: 'video', label: 'Videos' },
 ];
 
-export default function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar, favoritesOnly, singleSelect, onLogout }: GalleryViewProps) {
+export default function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar, favoritesOnly, singleSelect, onLogout, isActive = true }: GalleryViewProps) {
     const { folderId: routeFolderId } = useParams();
     const [searchParams, setSearchParams] = useSearchParams();
     const activeFolderId = folderId || routeFolderId;
@@ -152,7 +155,12 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const [showRemoveFromFolderConfirm, setShowRemoveFromFolderConfirm] = useState(false);
     const [autoTagResult, setAutoTagResult] = useState<{ title: string; message: string } | null>(null);
     const mediaRef = useRef<MediaItem[]>(media);
-    mediaRef.current = media;
+    // Track the last viewed item in modal for keyboard nav sync when modal closes
+    const lastModalItemIdRef = useRef<string | null>(null);
+    
+    useEffect(() => {
+        mediaRef.current = media;
+    }, [media]);
 
     const sortItems = useCallback((items: MediaItem[]) => {
         return [...items].sort((a, b) => {
@@ -247,7 +255,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     // --- Selection state ---
 
     const [selectionMode, setSelectionMode] = useState(false);
-    const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [selected, setSelected] = useState<Set<string>>(new Set()); // item IDs
     const [showPicker, setShowPicker] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
@@ -320,7 +328,9 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     const prevRefreshKeyRef = useRef(refreshKey);
     // mediaRef is already defined above
 
-
+    // --- Keyboard navigation state ---
+    const [focusedId, setFocusedId] = useState<string | null>(null);
+    
     // --- Exit selection mode helper ---
     const exitSelectionMode = useCallback(() => {
         setSelectionMode(false);
@@ -336,10 +346,10 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         setMarquee(null);
 
         let ids: string[] = [];
-        if (selected.has(item.filename)) {
+        if (selected.has(item.id!)) {
             // Dragging one of the selected items - drag all selected
             ids = mediaRef.current
-                .filter(m => selected.has(m.filename) && m.id)
+                .filter(m => selected.has(m.id!) && m.id)
                 .map(m => m.id!);
         } else if (item.id) {
             // Dragging an unselected item - drag just that one
@@ -652,7 +662,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         }
         
         const ids = media
-            .filter(m => selected.has(m.filename) && m.id)
+            .filter(m => selected.has(m.id!) && m.id)
             .map(m => m.id!);
             
         if (ids.length === 0) return;
@@ -824,52 +834,58 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
     }, [loadMore, isLoading]);
 
     // --- Selection handlers ---
-    const handleSelect = useCallback((filename: string, e: React.MouseEvent) => {
+    const handleSelect = useCallback((id: string, e?: React.MouseEvent) => {
         const currentMedia = mediaRef.current;
         setSelected(prev => {
             if (singleSelect) {
                 const next = new Set<string>();
-                next.add(filename);
-                lastClickedRef.current = filename;
+                next.add(id);
+                lastClickedRef.current = id;
                 return next;
             }
 
             const next = new Set(prev);
 
-            if (e.shiftKey && lastClickedRef.current) {
+            if (e?.shiftKey && lastClickedRef.current) {
                 // Range select: select everything between lastClicked and current
-                const lastIdx = currentMedia.findIndex(m => m.filename === lastClickedRef.current);
-                const curIdx = currentMedia.findIndex(m => m.filename === filename);
+                const lastIdx = currentMedia.findIndex(m => m.id === lastClickedRef.current);
+                const curIdx = currentMedia.findIndex(m => m.id === id);
                 if (lastIdx !== -1 && curIdx !== -1) {
                     const start = Math.min(lastIdx, curIdx);
                     const end = Math.max(lastIdx, curIdx);
                     for (let i = start; i <= end; i++) {
-                        next.add(currentMedia[i].filename);
+                        if (currentMedia[i].id) next.add(currentMedia[i].id!);
                     }
                 }
             } else {
                 // Toggle single item
-                if (next.has(filename)) {
-                    next.delete(filename);
+                if (next.has(id)) {
+                    next.delete(id);
                 } else {
-                    next.add(filename);
+                    next.add(id);
                 }
             }
 
-            lastClickedRef.current = filename;
+            lastClickedRef.current = id;
             return next;
         });
     }, [singleSelect]); // Stable callback
 
     const handleCardClick = useCallback((item: MediaItem) => {
-        if (item.id) {
-            setSearchParams(prev => {
-                const next = new URLSearchParams(prev);
-                next.set('media', item.id!);
-                return next;
-            });
+        if (!item.id) return;
+        setFocusedId(item.id);
+        
+        if (selectionMode) {
+            handleSelect(item.id);
+            return;
         }
-    }, [setSearchParams]);
+        
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('media', item.id!);
+            return next;
+        });
+    }, [selectionMode, handleSelect, setSearchParams]);
 
     const handleSelectAll = useCallback(() => {
         const currentMedia = mediaRef.current;
@@ -878,7 +894,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             setSelected(new Set());
         } else {
             // Select all currently loaded
-            setSelected(new Set(currentMedia.map(m => m.filename)));
+            setSelected(new Set(currentMedia.filter(m => m.id).map(m => m.id!)));
         }
     }, [selected.size]);
 
@@ -894,7 +910,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         try {
             // Resolve filenames -> IDs
             const ids = media
-                .filter(m => selected.has(m.filename) && m.id)
+                .filter(m => selected.has(m.id!) && m.id)
                 .map(m => m.id!);
 
             await apiClient.deleteMediaBatch(ids);
@@ -946,15 +962,14 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         setIsDeleting(true);
         try {
             const ids = media
-                .filter(m => selected.has(m.filename) && m.id)
+                .filter(m => selected.has(m.id!) && m.id)
                 .map(m => m.id!);
 
             await apiClient.removeMediaFromFolder(activeFolderId, ids);
 
             // Removing from folder only affects the current view, but metadata might need sync
             // Actually, we can just remove locally
-            const removedFilenames = new Set(selected);
-            setMedia(prev => prev.filter(m => !removedFilenames.has(m.filename)));
+            setMedia(prev => prev.filter(m => !selected.has(m.id!)));
             
             exitSelectionMode();
             setShowRemoveFromFolderConfirm(false);
@@ -975,7 +990,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         setIsAddingToFolder(true);
         try {
             const ids = media
-                .filter(m => selected.has(m.filename) && m.id)
+                .filter(m => selected.has(m.id!) && m.id)
                 .map(m => m.id!);
 
             await apiClient.addMediaToFolder(targetFolderId, ids);
@@ -1075,7 +1090,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         try {
             // Resolve filenames -> IDs
             const ids = media
-                .filter(m => selected.has(m.filename) && m.id)
+                .filter(m => selected.has(m.id!) && m.id)
                 .map(m => m.id!);
 
             const plan = await apiClient.getDownloadPlan(ids, abortController.signal);
@@ -1100,6 +1115,156 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         document.addEventListener('keydown', handler);
         return () => document.removeEventListener('keydown', handler);
     }, [selectionMode, exitSelectionMode]);
+
+
+
+    // --- Keyboard navigation (arrow keys + Enter) - only when modal is NOT open ---
+    const handleGridKeyDown = useCallback((e: KeyboardEvent) => {
+        // Don't handle if view is inactive, modal is open, or sub-picker is open
+        if (!isActive || selectedMediaId || showPicker) return;
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+
+        const currentMedia = isGrouped ? groups.flatMap(g => g.items) : mediaRef.current;
+        if (currentMedia.length === 0) return;
+
+        // Get all cards in the DOM to perform geometric navigation
+        const grid = gridRef.current;
+        if (!grid) return;
+        const cards = Array.from(grid.querySelectorAll<HTMLElement>('[data-id]'));
+        if (cards.length === 0) return;
+
+        // Find current focused element
+        let currentCardIdx = focusedId 
+            ? cards.findIndex(c => c.getAttribute('data-id') === focusedId)
+            : -1;
+        
+        let newCard: HTMLElement | null = null;
+
+        if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            if (currentCardIdx === -1) {
+                newCard = cards[0];
+            } else if (currentCardIdx < cards.length - 1) {
+                newCard = cards[currentCardIdx + 1];
+            }
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            if (currentCardIdx === -1) {
+                newCard = cards[cards.length - 1];
+            } else if (currentCardIdx > 0) {
+                newCard = cards[currentCardIdx - 1];
+            }
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (currentCardIdx === -1) {
+                newCard = e.key === 'ArrowDown' ? cards[0] : cards[cards.length - 1];
+            } else {
+                const currentRect = cards[currentCardIdx].getBoundingClientRect();
+                const currentCenterX = currentRect.left + currentRect.width / 2;
+                
+                // Find candidates in other rows
+                const candidates = cards.filter(c => {
+                    const r = c.getBoundingClientRect();
+                    if (e.key === 'ArrowDown') {
+                        return r.top > currentRect.top + 10; // Below current row
+                    } else {
+                        return r.top < currentRect.top - 10; // Above current row
+                    }
+                });
+
+                if (candidates.length > 0) {
+                    // Sort by vertical distance first, then horizontal distance from center
+                    candidates.sort((a, b) => {
+                        const ra = a.getBoundingClientRect();
+                        const rb = b.getBoundingClientRect();
+                        const distY = Math.abs(ra.top - currentRect.top) - Math.abs(rb.top - currentRect.top);
+                        if (Math.abs(distY) > 20) return distY; // Significant vertical difference
+                        
+                        const centerA = ra.left + ra.width / 2;
+                        const centerB = rb.left + rb.width / 2;
+                        return Math.abs(centerA - currentCenterX) - Math.abs(centerB - currentCenterX);
+                    });
+                    newCard = candidates[0];
+                }
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (focusedId) {
+                setSearchParams(prev => {
+                    const next = new URLSearchParams(prev);
+                    next.set('media', focusedId);
+                    return next;
+                });
+            }
+            return;
+        } else {
+            return;
+        }
+
+        if (newCard) {
+            const newId = newCard.getAttribute('data-id');
+            if (newId) {
+                setFocusedId(newId);
+                newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                newCard.focus();
+            }
+        }
+    }, [focusedId, selectedMediaId, showPicker, isGrouped, groups, setSearchParams, isActive]);
+
+    useEffect(() => {
+        window.addEventListener('keydown', handleGridKeyDown);
+        return () => window.removeEventListener('keydown', handleGridKeyDown);
+    }, [handleGridKeyDown]);
+
+    // --- Track last viewed item in modal and sync focus when modal closes ---
+    const prevSelectedMediaIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        // Track the modal item
+        if (selectedMediaId) {
+            lastModalItemIdRef.current = selectedMediaId;
+            prevSelectedMediaIdRef.current = selectedMediaId;
+        } else if (prevSelectedMediaIdRef.current !== null && !selectedMediaId) {
+            // Modal just closed (went from an ID to null)
+            const lastItemId = lastModalItemIdRef.current;
+            
+            // Find the item in current media list by ID
+            let newFocusedId: string | null = null;
+            
+            if (lastItemId) {
+                const items = isGrouped ? groups.flatMap(g => g.items) : mediaRef.current;
+                const item = items.find(m => m.id === lastItemId);
+                if (item) {
+                    // Item still exists, select it
+                    newFocusedId = item.id || null;
+                } else {
+                    // Item was deleted - select the first item
+                    if (items.length > 0) {
+                        newFocusedId = items[0].id || null;
+                    }
+                }
+            }
+            
+            if (newFocusedId) {
+                setFocusedId(newFocusedId);
+                // Scroll to the focused item
+                setTimeout(() => {
+                    if (gridRef.current) {
+                        const cards = gridRef.current.querySelectorAll<HTMLElement>('[data-id]');
+                        for (const card of cards) {
+                            if (card.getAttribute('data-id') === newFocusedId) {
+                                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                card.focus();
+                                break;
+                            }
+                        }
+                    }
+                }, 50);
+            }
+            
+            prevSelectedMediaIdRef.current = null;
+        }
+    }, [selectedMediaId, media, isGrouped, groups]);
 
     // --- Close folder picker when clicking outside ---
     useEffect(() => {
@@ -1127,7 +1292,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         if (!grid) return new Set();
 
         const result = new Set<string>();
-        const cards = grid.querySelectorAll<HTMLElement>('[data-filename]');
+        const cards = grid.querySelectorAll<HTMLElement>('[data-id]');
         const scrollParent = getScrollParent();
         const scrollLeft = scrollParent?.scrollLeft ?? 0;
         const scrollTop = scrollParent?.scrollTop ?? 0;
@@ -1148,8 +1313,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
             // AABB intersection test
             if (mLeft < cRight && mRight > cLeft && mTop < cBottom && mBottom > cTop) {
-                const fn = card.getAttribute('data-filename');
-                if (fn) result.add(fn);
+                const id = card.getAttribute('data-id');
+                if (id) result.add(id);
             }
         }
         return result;
@@ -1161,7 +1326,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         if (e.button !== 0 || singleSelect) return;
         // Don't start marquee if clicking directly on a card's interactive element
         const target = e.target as HTMLElement;
-        if (target.closest('[data-filename]')) return;
+        if (target.closest('[data-id]')) return;
 
         // Enter selection mode automatically when starting a marquee
         if (!selectionMode) setSelectionMode(true);
@@ -1254,8 +1419,8 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 e.preventDefault();
                 if (media.length > 0) {
                     if (!selectionMode) setSelectionMode(true);
-                    const allFilenames = new Set(media.map(m => m.filename));
-                    setSelected(allFilenames);
+                    const allIds = new Set(media.filter(m => m.id).map(m => m.id!));
+                    setSelected(allIds);
                 }
             }
 
@@ -1694,111 +1859,109 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 </div>
             )}
 
-            {/* Grid */}
-            {!isGrouped && media.length > 0 && (
-                <div
-                    ref={gridRef}
-                    onMouseDown={handleGridMouseDown}
-                    className="grid gap-0.5 select-none"
-                    style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}
-                >
-
-                    {media.map((item, index) => {
-                        let showYearHeader = false;
-                        if (sortBy === 'date') {
-                            const date = new Date(item.original_date);
-                            const year = isNaN(date.getTime()) ? 'Unknown' : date.getFullYear();
-                            
-                            if (index === 0) {
-                                showYearHeader = true;
-                            } else {
-                                const prevDate = new Date(media[index - 1].original_date);
-                                const prevYear = isNaN(prevDate.getTime()) ? 'Unknown' : prevDate.getFullYear();
-                                showYearHeader = year !== prevYear;
+            {/* Grid Container */}
+            <div ref={gridRef}>
+                {!isGrouped && media.length > 0 && (
+                    <div
+                        onMouseDown={handleGridMouseDown}
+                        className="grid gap-0.5 select-none"
+                        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}
+                    >
+                        {media.map((item, index) => {
+                            let showYearHeader = false;
+                            if (sortBy === 'date') {
+                                const date = new Date(item.original_date);
+                                const year = isNaN(date.getTime()) ? 'Unknown' : date.getFullYear();
+                                
+                                if (index === 0) {
+                                    showYearHeader = true;
+                                } else {
+                                    const prevDate = new Date(media[index - 1].original_date);
+                                    const prevYear = isNaN(prevDate.getTime()) ? 'Unknown' : prevDate.getFullYear();
+                                    showYearHeader = year !== prevYear;
+                                }
                             }
-                        }
 
-                        return (
-                            <Fragment key={item.filename}>
-                                {showYearHeader && (() => {
-                                    const date = new Date(item.original_date);
-                                    const year = isNaN(date.getTime()) ? 'Unknown' : date.getFullYear();
-                                    return (
-                                        <div className="col-span-full pt-4 pb-2 px-1 first:pt-0">
-                                            <h3 className="text-xl font-bold text-gray-500/50 dark:text-gray-500/50 select-text">
-                                                {year}
-                                            </h3>
-                                        </div>
-                                    );
-                                })()}
-                                <MediaCard
-                                    item={item}
-                                    onClick={() => handleCardClick(item)}
-                                    selected={selected.has(item.filename)}
-                                    selectionMode={selectionMode}
-                                    onSelect={(e) => handleSelect(item.filename, e)}
-                                    onToggleFavorite={() => handleToggleFavorite(item)}
-                                    onDragStart={(e) => handleDragStartMedia(item, e)}
-                                    showSize={sortBy === 'size'}
-                                />
-
-                            </Fragment>
-                        );
-                    })}
-
-                </div>
-            )}
-
-            {/* Grouped View */}
-            {isGrouped && (
-                <div className="relative space-y-4 pb-12">
-                    {/* Loading overlay when computing similarity groups */}
-                    {isLoading && (
-                        <LoadingIndicator 
-                            variant="overlay" 
-                            label="Computing similarity groups..." 
-                            color="text-purple-600" 
-                            className="pt-32 bg-gray-50/80 dark:bg-gray-900/80"
-                        />
-                    )}
-                    {groups.length === 0 && !isLoading && (
-                        <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600">
-                            <p className="text-gray-500 dark:text-gray-400">No similar groups found.</p>
-                        </div>
-                    )}
-                    {groups.map((group) => (
-                        <div key={group.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
-                            <div className="flex items-center gap-2 mb-3">
-                                <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 px-2.5 py-1 rounded-md">
-                                    Group {group.id + 1}
-                                </span>
-                                <span className="text-xs text-gray-500 dark:text-gray-400">
-                                    {group.items.length} items
-                                </span>
-                            </div>
-                            <div 
-                                className="grid gap-0.5"
-                                style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}
-                            >
-
-                                {group.items.map((item) => (
+                            return (
+                                <Fragment key={item.id || item.filename}>
+                                    {showYearHeader && (() => {
+                                        const date = new Date(item.original_date);
+                                        const year = isNaN(date.getTime()) ? 'Unknown' : date.getFullYear();
+                                        return (
+                                            <div className="col-span-full pt-4 pb-2 px-1 first:pt-0">
+                                                <h3 className="text-xl font-bold text-gray-500/50 dark:text-gray-500/50 select-text">
+                                                    {year}
+                                                </h3>
+                                            </div>
+                                        );
+                                    })()}
                                     <MediaCard
-                        key={item.filename}
-                        item={item}
-                        onClick={() => handleCardClick(item)}
-                        selected={selected.has(item.filename)}
-                        selectionMode={selectionMode}
-                        onSelect={(e) => handleSelect(item.filename, e)}
-                        onToggleFavorite={() => handleToggleFavorite(item)}
-                        onDragStart={(e) => handleDragStartMedia(item, e)}
-                    />
+                                        item={item}
+                                        onClick={() => handleCardClick(item)}
+                                        selected={selected.has(item.id!)}
+                                        selectionMode={selectionMode}
+                                        onSelect={(e) => handleSelect(item.id!, e)}
+                                        onToggleFavorite={() => handleToggleFavorite(item)}
+                                        onDragStart={(e) => handleDragStartMedia(item, e)}
+                                        showSize={sortBy === 'size'}
+                                    focused={focusedId === item.id}
+                                />
+                                </Fragment>
+                            );
+                        })}
+                    </div>
+                )}
 
-                ))}
+                {/* Grouped View */}
+                {isGrouped && (
+                    <div className="relative space-y-4 pb-12">
+                        {/* Loading overlay when computing similarity groups */}
+                        {isLoading && (
+                            <LoadingIndicator 
+                                variant="overlay" 
+                                label="Computing similarity groups..." 
+                                color="text-purple-600" 
+                                className="pt-32 bg-gray-50/80 dark:bg-gray-900/80"
+                            />
+                        )}
+                        {groups.length === 0 && !isLoading && (
+                            <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600">
+                                <p className="text-gray-500 dark:text-gray-400">No similar groups found.</p>
+                            </div>
+                        )}
+                        {groups.map((group) => (
+                            <div key={group.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 px-2.5 py-1 rounded-md">
+                                        Group {group.id + 1}
+                                    </span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                        {group.items.length} items
+                                    </span>
+                                </div>
+                                <div 
+                                    className="grid gap-0.5"
+                                    style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}
+                                >
+                                    {group.items.map((item) => (
+                                        <MediaCard
+                                            key={item.id || item.filename}
+                                            item={item}
+                                            onClick={() => handleCardClick(item)}
+                                            selected={selected.has(item.id!)}
+                                            selectionMode={selectionMode}
+                                            onSelect={(e) => handleSelect(item.id!, e)}
+                                            onToggleFavorite={() => handleToggleFavorite(item)}
+                                            onDragStart={(e) => handleDragStartMedia(item, e)}
+                                            focused={focusedId === item.id}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
-                        </div>
-                    ))}
-                </div>
-            )}
 
             {/* Sentinel for IntersectionObserver */}
             {hasMore && !isGrouped && <div ref={sentinelRef} className="h-1" />}
@@ -1862,7 +2025,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                             <button
                                 onClick={() => {
                                     const ids = media
-                                        .filter(m => selected.has(m.filename) && m.id)
+                                        .filter(m => selected.has(m.id!) && m.id)
                                         .map(m => m.id!);
                                     onPick?.(ids);
                                 }}
@@ -2051,7 +2214,7 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
 
             {/* Detail modal */}
             {(() => {
-                if (selectedMediaId === null || selectionMode) return null;
+                if (!isActive || selectedMediaId === null || selectionMode) return null;
                 
                 // Find item in flat list or groups
                 let item: MediaItem | undefined;

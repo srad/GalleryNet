@@ -13,6 +13,8 @@ interface MediaCardProps {
     onToggleFavorite?: () => void;
     onDragStart?: (e: React.DragEvent) => void;
     showSize?: boolean;
+    /** Whether the card is focused via keyboard navigation */
+    focused?: boolean;
 }
 
 
@@ -39,21 +41,35 @@ function formatBytes(bytes: number): string {
     return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export default function MediaCard({ item, onClick, selected, selectionMode, onSelect, onToggleFavorite, onDragStart, showSize }: MediaCardProps) {
+export default function MediaCard({ item, onClick, selected, selectionMode, onSelect, onToggleFavorite, onDragStart, showSize, focused }: MediaCardProps) {
 
 
     const video = isVideo(item.filename);
 
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (selectionMode && onSelect) {
+                onSelect(e as unknown as React.MouseEvent);
+            } else if (onClick) {
+                onClick();
+            }
+        }
+    };
+
     return (
         <div
             data-filename={item.filename}
+            data-id={item.id}
             onClick={selectionMode ? onSelect : onClick}
+            onKeyDown={handleKeyDown}
             draggable={!!onDragStart}
             onDragStart={onDragStart}
-            className={`group relative block overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800 border shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 w-full text-left cursor-pointer ${
+            tabIndex={0}
+            className={`group relative block overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800 border shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 w-full text-left cursor-pointer outline-none ${
 
-                selected
-                    ? 'border-blue-500 ring-2 ring-blue-500/40'
+                selected || focused
+                    ? 'z-10 ring-4 ring-offset-2 ring-offset-white dark:ring-offset-gray-900 ring-blue-500 dark:ring-cyan-400'
                     : 'border-gray-200/60 dark:border-gray-700/60'
             }`}
         >

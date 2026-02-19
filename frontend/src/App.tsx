@@ -195,6 +195,7 @@ export default function App() {
                 <main className="flex-1 h-full overflow-y-auto">
                     <div className={isGallery ? '' : 'hidden'}>
                         <GalleryView
+                            isActive={isGallery}
                             filter={mediaFilter}
                             onFilterChange={handleFilterChange}
                             refreshKey={refreshKey}
@@ -209,6 +210,7 @@ export default function App() {
 
                     <div className={isFavorites ? '' : 'hidden'}>
                         <GalleryView
+                            isActive={isFavorites}
                             filter={mediaFilter}
                             onFilterChange={handleFilterChange}
                             refreshKey={refreshKey}
@@ -224,6 +226,7 @@ export default function App() {
 
                     <div className={isSearch ? 'p-4 md:p-8' : 'hidden'}>
                         <SearchView
+                            isActive={isSearch}
                             folders={folders}
                             refreshKey={refreshKey}
                             onFoldersChanged={fetchFolders}
@@ -233,6 +236,7 @@ export default function App() {
 
                     {isFolder && activeFolderId && (
                         <GalleryView
+                            isActive={true}
                             key={`folder-${activeFolderId}`}
                             filter={mediaFilter}
                             onFilterChange={handleFilterChange}

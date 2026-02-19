@@ -14,9 +14,10 @@ interface SearchViewProps {
     refreshKey: number;
     onFoldersChanged: () => void;
     onLogout?: () => void;
+    isActive?: boolean;
 }
 
-export default function SearchView({ folders, refreshKey, onFoldersChanged, onLogout }: SearchViewProps) {
+export default function SearchView({ folders, refreshKey, onFoldersChanged, onLogout, isActive = true }: SearchViewProps) {
     const [searchParams, setSearchParams] = useSearchParams();
     const sourceId = searchParams.get('source');
     const selectedMediaId = searchParams.get('media');
@@ -174,7 +175,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
     // Render modal logic
 
     const renderModal = () => {
-        if (!selectedMediaId) return null;
+        if (!isActive || !selectedMediaId) return null;
 
         const idx = searchResults.findIndex(m => m.id === selectedMediaId);
         // Find item in results, or use deep linking logic if needed (handled by MediaModal anyway)

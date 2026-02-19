@@ -81,6 +81,7 @@
 - **Password Protection** &mdash; Optional single-password auth with rate limiting and secure sessions. No complex user
   management, only a simple password.
 - **Responsive UI** &mdash; Infinite-scroll grid, keyboard shortcuts, touch swipe, and full mobile support. Includes a persistent **thumbnail resizer** (S/M/L) to customize your viewing experience.
+- **Drag-and-Drop Upload** &mdash; Drag files anywhere into the browser window to upload. Context-aware: dropping into a virtual folder automatically adds the files to that folder.
 
 - **Real-time Sync** &mdash; WebSocket-powered instant updates across all browser clients; all users can see new uploads, favorite toggles, and folder changes immediately as they happen
 - **Self-Healing** &mdash; Automatically detects and repairs missing thumbnails or metadata in the background

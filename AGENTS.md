@@ -252,6 +252,7 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - **Standardized Loading**: Global `LoadingIndicator.tsx` provides consistent visual feedback for initial app load, pagination, similarity search, and batch actions.
 - **Virtual folders**: Organizational folders (many-to-many relationship with media). Sidebar shows folder list with Link-based navigation. Features an "Add from Library" button that opens a `LibraryPicker` modal. `LibraryPicker` supports a `singleSelect` mode specifically for choosing search references. Folders are drag-to-reorder via native HTML5 drag-and-drop. Supports **drag-and-drop of media items** directly from the gallery or search results into folders, with a success checkmark confirmation.
 - **Keyboard Shortcuts**: Native-like gallery experience with `Ctrl+A` (or `Cmd+A`) to select all loaded items, and `Delete` (or `Backspace`) to trigger batch deletion or removal from the current folder. Shortcuts are automatically disabled when typing in inputs.
+- **Global Drag-and-Drop**: Supports dragging files anywhere into the browser window. A global overlay provides visual feedback. Files are context-aware: dropping into a virtual folder adds them to that folder; dropping elsewhere adds them to the main library. Implemented via `App` level event listeners delegating to `GalleryView` refs.
 
 
 ## Dependencies

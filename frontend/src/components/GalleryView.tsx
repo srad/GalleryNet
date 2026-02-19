@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import { useState, useEffect, useRef, useCallback, Fragment, forwardRef, useImperativeHandle } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import type { MediaItem, MediaFilter, Folder, MediaGroup, TagDetail } from '../types';
 
@@ -61,6 +61,10 @@ export function LibraryPicker({ onPick, onCancel, refreshKey, folders, onFolders
     );
 }
 
+export interface GalleryViewHandle {
+    handleUpload: (files: FileList) => void;
+}
+
 interface GalleryViewProps {
     filter: MediaFilter;
     onFilterChange: (filter: MediaFilter) => void;
@@ -107,7 +111,7 @@ const FILTERS: { value: MediaFilter; label: string }[] = [
     { value: 'video', label: 'Videos' },
 ];
 
-export default function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar, favoritesOnly, singleSelect, onLogout, isActive = true }: GalleryViewProps) {
+const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function GalleryView({ filter, onFilterChange, refreshKey, folderId, folderName, onBackToGallery, folders, onFoldersChanged, onUploadComplete, onBusyChange, isPicker, onPick, onCancelPick, onFindSimilar, favoritesOnly, singleSelect, onLogout, isActive = true }, ref) {
     const { folderId: routeFolderId } = useParams();
     const [searchParams, setSearchParams] = useSearchParams();
     const activeFolderId = folderId || routeFolderId;
@@ -1441,6 +1445,10 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [media, selectionMode, selected, activeFolderId, handleRemoveFromFolder, handleBatchDelete]);
 
+    useImperativeHandle(ref, () => ({
+        handleUpload
+    }));
+
     return (
 
         <div ref={scrollContainerRef} className="px-4 md:px-8 pb-12">
@@ -2399,4 +2407,6 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
             )}
         </div>
     );
-}
+});
+
+export default GalleryView;

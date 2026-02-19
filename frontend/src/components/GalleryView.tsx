@@ -1704,27 +1704,33 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                 >
 
                     {media.map((item, index) => {
-                        const date = new Date(item.original_date);
-                        const year = isNaN(date.getTime()) ? 'Unknown' : date.getFullYear();
-                        
-                        let showHeader = false;
-                        if (index === 0) {
-                            showHeader = true;
-                        } else {
-                            const prevDate = new Date(media[index - 1].original_date);
-                            const prevYear = isNaN(prevDate.getTime()) ? 'Unknown' : prevDate.getFullYear();
-                            showHeader = year !== prevYear;
+                        let showYearHeader = false;
+                        if (sortBy === 'date') {
+                            const date = new Date(item.original_date);
+                            const year = isNaN(date.getTime()) ? 'Unknown' : date.getFullYear();
+                            
+                            if (index === 0) {
+                                showYearHeader = true;
+                            } else {
+                                const prevDate = new Date(media[index - 1].original_date);
+                                const prevYear = isNaN(prevDate.getTime()) ? 'Unknown' : prevDate.getFullYear();
+                                showYearHeader = year !== prevYear;
+                            }
                         }
 
                         return (
                             <Fragment key={item.filename}>
-                                {showHeader && (
-                                    <div className="col-span-full pt-4 pb-2 px-1 first:pt-0">
-                                        <h3 className="text-xl font-bold text-gray-500/50 dark:text-gray-500/50 select-text">
-                                            {year}
-                                        </h3>
-                                    </div>
-                                )}
+                                {showYearHeader && (() => {
+                                    const date = new Date(item.original_date);
+                                    const year = isNaN(date.getTime()) ? 'Unknown' : date.getFullYear();
+                                    return (
+                                        <div className="col-span-full pt-4 pb-2 px-1 first:pt-0">
+                                            <h3 className="text-xl font-bold text-gray-500/50 dark:text-gray-500/50 select-text">
+                                                {year}
+                                            </h3>
+                                        </div>
+                                    );
+                                })()}
                                 <MediaCard
                                     item={item}
                                     onClick={() => handleCardClick(item)}
@@ -1733,11 +1739,13 @@ export default function GalleryView({ filter, onFilterChange, refreshKey, folder
                                     onSelect={(e) => handleSelect(item.filename, e)}
                                     onToggleFavorite={() => handleToggleFavorite(item)}
                                     onDragStart={(e) => handleDragStartMedia(item, e)}
+                                    showSize={sortBy === 'size'}
                                 />
 
                             </Fragment>
                         );
                     })}
+
                 </div>
             )}
 

@@ -12,7 +12,9 @@ interface MediaCardProps {
     onSelect?: (e: React.MouseEvent) => void;
     onToggleFavorite?: () => void;
     onDragStart?: (e: React.DragEvent) => void;
+    showSize?: boolean;
 }
+
 
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'wmv']);
@@ -37,7 +39,8 @@ function formatBytes(bytes: number): string {
     return `${val.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export default function MediaCard({ item, onClick, selected, selectionMode, onSelect, onToggleFavorite, onDragStart }: MediaCardProps) {
+export default function MediaCard({ item, onClick, selected, selectionMode, onSelect, onToggleFavorite, onDragStart, showSize }: MediaCardProps) {
+
 
     const video = isVideo(item.filename);
 
@@ -123,7 +126,14 @@ export default function MediaCard({ item, onClick, selected, selectionMode, onSe
                     </div>
                 </div>
             )}
+            {/* Always-visible size badge when showSize is true */}
+            {showSize && item.size_bytes != null && (
+                <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/40 backdrop-blur-sm border border-white/10 text-white text-[9px] font-bold uppercase tracking-wider z-10">
+                    {formatBytes(item.size_bytes)}
+                </span>
+            )}
             {/* Overlay gradient on hover */}
+
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 flex flex-col justify-end p-2 gap-1.5">
 
 

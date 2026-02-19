@@ -65,11 +65,11 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
     useEffect(() => {
         if (similarityParam) {
             const val = parseInt(similarityParam, 10);
-            if (!isNaN(val) && val !== localSimilarity) {
-                setLocalSimilarity(val);
+            if (!isNaN(val)) {
+                setLocalSimilarity(prev => (prev !== val ? val : prev));
             }
         }
-    }, [similarityParam, localSimilarity]);
+    }, [similarityParam]);
 
     // Main search trigger effect
     useEffect(() => {
@@ -304,7 +304,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                         <input
                             id="similarity"
                             type="range"
-                            min="0"
+                            min="50"
                             max="100"
                             value={localSimilarity}
                             onChange={(e) => setLocalSimilarity(Number(e.target.value))}

@@ -1777,7 +1777,7 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
                                     </span>
                                     <input
                                         type="range"
-                                        min="50"
+                                        min="30"
                                         max="99"
                                         value={groupSimilarity}
                                         onChange={(e) => setGroupSimilarity(Number(e.target.value))}
@@ -1787,6 +1787,7 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
                                         className="w-24 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-purple-600 hover:accent-purple-700"
                                         title="Adjust similarity grouping threshold"
                                     />
+
                                 </div>
                             )}
 

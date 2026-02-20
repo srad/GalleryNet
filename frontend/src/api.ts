@@ -1,5 +1,6 @@
 import { apiFetch } from './auth';
-import type { MediaItem, MediaGroup, MediaFilter, Stats, TagCount, Folder } from './types';
+import type { MediaItem, MediaGroup, MediaFilter, Stats, TagCount, Folder, PersonSummary } from './types';
+
 
 export interface DownloadPart {
     id: string;
@@ -209,7 +210,24 @@ export class ApiClient {
         return res.json();
     }
 
+    async getPeople(): Promise<PersonSummary[]> {
+        const res = await apiFetch(this.getUrl('/api/media/faces/people'));
+        if (!res.ok) throw new Error('Failed to fetch people');
+        return res.json();
+    }
+
+    async searchFaces(faceId: string, similarity: number): Promise<MediaItem[]> {
+        const res = await apiFetch(this.getUrl('/api/media/faces/search'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ face_id: faceId, similarity }),
+        });
+        if (!res.ok) throw new Error('Face search failed');
+        return res.json();
+    }
+
     async toggleFavorite(id: string, favorite: boolean): Promise<void> {
+
         const res = await apiFetch(this.getUrl(`/api/media/${id}/favorite`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

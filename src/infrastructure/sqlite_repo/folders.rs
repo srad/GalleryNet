@@ -144,17 +144,26 @@ impl SqliteRepository {
 
     pub(crate) fn delete_folder_impl(&self, id: Uuid) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            conn.execute(
+            let tx = conn
+                .transaction()
+                .map_err(|e| DomainError::Database(e.to_string()))?;
+
+            tx.execute(
                 "DELETE FROM folder_media WHERE folder_id = ?1",
                 params![id.as_bytes()],
             )
             .map_err(|e| DomainError::Database(e.to_string()))?;
-            let deleted = conn
+
+            let deleted = tx
                 .execute("DELETE FROM folders WHERE id = ?1", params![id.as_bytes()])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
+
             if deleted == 0 {
                 return Err(DomainError::NotFound);
             }
+
+            tx.commit()
+                .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })
     }
@@ -176,13 +185,22 @@ impl SqliteRepository {
 
     pub(crate) fn reorder_folders_impl(&self, order: &[(Uuid, i64)]) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("UPDATE folders SET sort_order = ?1 WHERE id = ?2")
+            let tx = conn
+                .transaction()
                 .map_err(|e| DomainError::Database(e.to_string()))?;
-            for (id, sort_order) in order {
-                stmt.execute(params![sort_order, id.as_bytes()])
+
+            {
+                let mut stmt = tx
+                    .prepare("UPDATE folders SET sort_order = ?1 WHERE id = ?2")
                     .map_err(|e| DomainError::Database(e.to_string()))?;
+                for (id, sort_order) in order {
+                    stmt.execute(params![sort_order, id.as_bytes()])
+                        .map_err(|e| DomainError::Database(e.to_string()))?;
+                }
             }
+
+            tx.commit()
+                .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })
     }
@@ -193,18 +211,24 @@ impl SqliteRepository {
         media_ids: &[Uuid],
     ) -> Result<usize, DomainError> {
         self.with_conn(|conn| {
+            let tx = conn.transaction().map_err(|e| DomainError::Database(e.to_string()))?;
             let now = Utc::now().to_rfc3339();
             let mut added = 0usize;
-            for media_id in media_ids {
-                let res = conn.execute(
-                    "INSERT OR IGNORE INTO folder_media (folder_id, media_id, added_at) VALUES (?1, ?2, ?3)",
-                    params![folder_id.as_bytes(), media_id.as_bytes(), now],
-                );
-                match res {
-                    Ok(n) => added += n,
-                    Err(e) => return Err(DomainError::Database(e.to_string())),
+            
+            {
+                let mut stmt = tx.prepare("INSERT OR IGNORE INTO folder_media (folder_id, media_id, added_at) VALUES (?1, ?2, ?3)")
+                    .map_err(|e| DomainError::Database(e.to_string()))?;
+                
+                for media_id in media_ids {
+                    let res = stmt.execute(params![folder_id.as_bytes(), media_id.as_bytes(), now]);
+                    match res {
+                        Ok(n) => added += n,
+                        Err(e) => return Err(DomainError::Database(e.to_string())),
+                    }
                 }
             }
+
+            tx.commit().map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(added)
         })
     }
@@ -215,16 +239,26 @@ impl SqliteRepository {
         media_ids: &[Uuid],
     ) -> Result<usize, DomainError> {
         self.with_conn(|conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| DomainError::Database(e.to_string()))?;
             let mut removed = 0usize;
-            for media_id in media_ids {
-                let n = conn
-                    .execute(
-                        "DELETE FROM folder_media WHERE folder_id = ?1 AND media_id = ?2",
-                        params![folder_id.as_bytes(), media_id.as_bytes()],
-                    )
+
+            {
+                let mut stmt = tx
+                    .prepare("DELETE FROM folder_media WHERE folder_id = ?1 AND media_id = ?2")
                     .map_err(|e| DomainError::Database(e.to_string()))?;
-                removed += n;
+
+                for media_id in media_ids {
+                    let n = stmt
+                        .execute(params![folder_id.as_bytes(), media_id.as_bytes()])
+                        .map_err(|e| DomainError::Database(e.to_string()))?;
+                    removed += n;
+                }
             }
+
+            tx.commit()
+                .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(removed)
         })
     }
@@ -237,6 +271,10 @@ impl SqliteRepository {
         media_type: Option<&str>,
         favorite: bool,
         tags: Option<Vec<String>>,
+        person_id: Option<Uuid>,
+        cluster_id: Option<i64>,
+        person_id: Option<Uuid>,
+        cluster_id: Option<i64>,
         sort_asc: bool,
         sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
@@ -267,6 +305,17 @@ impl SqliteRepository {
             }
 
             // Tag filtering: media must have ANY of the specified tags (OR)
+            
+            if let Some(pid) = person_id {
+                sql.push_str(" AND EXISTS (SELECT 1 FROM faces f2 WHERE f2.media_id = m.id AND f2.person_id = ?)");
+                params_vec.push(Box::new(pid.as_bytes().to_vec()));
+            }
+
+            if let Some(cid) = cluster_id {
+                sql.push_str(" AND EXISTS (SELECT 1 FROM faces f2 WHERE f2.media_id = m.id AND f2.cluster_id = ?)");
+                params_vec.push(Box::new(cid));
+            }
+
             if let Some(ref tag_list) = tags {
                 if !tag_list.is_empty() {
                     let placeholders: Vec<String> = tag_list.iter().map(|_| "?".to_string()).collect();

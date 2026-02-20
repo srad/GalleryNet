@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { MediaItem } from '../types';
+
 import { apiClient } from '../api';
 import { fireMediaUpdate } from '../events';
 
@@ -52,6 +54,10 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
     const videoRef = useRef<HTMLVideoElement>(null);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
     const [isSearching, setIsSearching] = useState(false);
+    const [showFaces, setShowFaces] = useState(true);
+
+    const navigate = useNavigate();
+
 
     const handleSearchImage = useCallback(async () => {
         if (!item.id) return;
@@ -340,16 +346,57 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                             className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl cursor-grab active:cursor-grabbing"
                         />
                     ) : (
+                        <div className="relative group/img-container max-w-full max-h-[90vh] lg:max-h-[94vh] flex items-center justify-center">
+                            <div className="relative">
+                                <img
+                                    key={item.filename}
+                                    src={mediaUrl}
+                                    alt={item.original_filename || item.filename}
+                                    draggable
+                                    onDragStart={handleDragStart}
+                                    className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl block cursor-grab active:cursor-grabbing"
+                                />
+                                
+                                {/* Faces Overlay - perfectly matches the img area because the parent div shrink-wraps the img */}
+                                {displayItem.faces && displayItem.faces.length > 0 && showFaces && (
+                                    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                                        {displayItem.faces.map(face => {
+                                            const imgWidth = displayItem.width || 1;
+                                            const imgHeight = displayItem.height || 1;
+                                            const left = (face.box_x1 / imgWidth) * 100;
+                                            const top = (face.box_y1 / imgHeight) * 100;
+                                            const width = ((face.box_x2 - face.box_x1) / imgWidth) * 100;
+                                            const height = ((face.box_y2 - face.box_y1) / imgHeight) * 100;
 
-                        <img
-                            key={item.filename}
-                            src={mediaUrl}
-                            alt={item.original_filename || item.filename}
-                            draggable
-                            onDragStart={handleDragStart}
-                            className="max-w-full max-h-[90vh] lg:max-h-[94vh] rounded-lg shadow-2xl object-contain cursor-grab active:cursor-grabbing"
-                        />
+                                            return (
+                                                <button
+                                                    key={face.id}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate(`/search?face=${face.id}`);
+                                                    }}
+                                                    className="absolute border-2 border-white/40 hover:border-blue-400 hover:bg-blue-400/20 pointer-events-auto transition-all rounded-sm group/face shadow-[0_0_8px_rgba(0,0,0,0.5)]"
+                                                    style={{
+                                                        left: `${left}%`,
+                                                        top: `${top}%`,
+                                                        width: `${width}%`,
+                                                        height: `${height}%`,
+                                                    }}
+                                                    title="Find more of this person"
+                                                >
+                                                    <div className="absolute -top-6 left-0 bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover/face:opacity-100 transition-opacity whitespace-nowrap shadow-md">
+                                                        Search Person
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     )}
+
+
 
                 </div>
 
@@ -462,6 +509,25 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                                 Find Similar
                             </button>
                         )}
+
+                        {/* Toggle Faces Button */}
+                        {!video && displayItem.faces && displayItem.faces.length > 0 && (
+                            <button
+                                onClick={() => setShowFaces(!showFaces)}
+                                className={`flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium rounded-lg transition-colors border ${
+                                    showFaces
+                                        ? 'bg-blue-500/20 text-blue-100 border-blue-500/30 hover:bg-blue-500/30'
+                                        : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
+                                }`}
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                                {showFaces ? 'Hide Identified People' : 'Show Identified People'}
+                            </button>
+                        )}
+
 
                         {/* Search Image Button */}
                         {!video && (

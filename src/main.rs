@@ -15,8 +15,10 @@ use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use infrastructure::{SqliteRepository, OrtProcessor, PhashGenerator};
-use application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, GroupFacesUseCase, TagLearningUseCase, FixThumbnailsUseCase, ExternalSearchUseCase};
+use domain::ports::MediaRepository;
+use application::{UploadMediaUseCase, SearchSimilarUseCase, ListMediaUseCase, DeleteMediaUseCase, GroupMediaUseCase, GroupFacesUseCase, TagLearningUseCase, FixThumbnailsUseCase, ExternalSearchUseCase, IndexFacesUseCase, FindSimilarFacesUseCase, ListPeopleUseCase};
 use presentation::{AppState, AuthConfig, app_router};
+
 
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::cors::{CorsLayer, AllowOrigin};
@@ -40,11 +42,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Configuration
-    let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "gallery.db".to_string());
+    let mut db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "gallery.db".to_string());
     let model_path = std::env::var("MODEL_PATH").unwrap_or_else(|_| "assets/models/mobilenetv3.onnx".to_string());
     let upload_dir = PathBuf::from(std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "uploads".to_string()));
     let thumbnail_dir = PathBuf::from(std::env::var("THUMBNAIL_DIR").unwrap_or_else(|_| "thumbnails".to_string()));
     let port = 3000;
+
+    // Command line arguments
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!("GalleryNet - AI-powered media gallery");
+        println!("Usage: gallerynet [OPTIONS]");
+        println!("");
+        println!("Options:");
+        println!("  --db <path>       Path to the SQLite database (default: gallery.db)");
+        println!("  --reset-faces     Clear all face detections and trigger re-scan");
+        println!("  --help, -h        Show this help message");
+        return Ok(());
+    }
+
+    // Parse --db parameter
+    for i in 0..args.len() {
+        if args[i] == "--db" && i + 1 < args.len() {
+            db_path = args[i + 1].clone();
+        }
+    }
 
     // Authentication — optional, enabled when GALLERY_PASSWORD is set
     let auth_config = std::env::var("GALLERY_PASSWORD").ok().and_then(|pw| {
@@ -68,9 +91,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all(&thumbnail_dir).expect("Failed to create thumbnail directory");
     }
 
-    // Initialize Infrastructure
-    println!("Initializing Database...");
+    // Initialize Infrastructure (Database first)
+    println!("Initializing Database at {}...", db_path);
     let repo = Arc::new(SqliteRepository::new(&db_path)?);
+
+    // Command line arguments - check THIS before loading heavy AI models
+    if args.iter().any(|arg| arg == "--reset-faces") {
+        println!("Resetting face index as requested...");
+        match repo.reset_face_index() {
+            Ok(_) => {
+                println!("SUCCESS: Face index has been cleared and bounding boxes deleted.");
+                println!("Restart the application normally to begin re-indexing.");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("ERROR: Failed to reset face index: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     println!("Initializing AI Processor (Loading {})...", model_path);
     let ai = match OrtProcessor::new(&model_path) {
@@ -85,6 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hasher = Arc::new(PhashGenerator::new());
 
     // Initialize Use Cases
+
     let upload_use_case = Arc::new(UploadMediaUseCase::new(
         repo.clone(),
         ai.clone(),
@@ -96,6 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let search_use_case = Arc::new(SearchSimilarUseCase::new(
         repo.clone(),
         ai.clone(),
+        upload_dir.clone(),
     ));
 
     let list_use_case = Arc::new(ListMediaUseCase::new(
@@ -133,13 +174,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         upload_dir.clone(),
     ));
 
+    let index_faces_use_case = Arc::new(IndexFacesUseCase::new(
+        repo.clone(),
+        ai.clone(),
+        upload_dir.clone(),
+    ));
+
+    let list_people_use_case = Arc::new(ListPeopleUseCase::new(
+        repo.clone(),
+    ));
+
+    let find_similar_faces_use_case = Arc::new(FindSimilarFacesUseCase::new(
+        repo.clone(),
+    ));
+
     let (tx, _) = tokio::sync::broadcast::channel(100);
 
     // Initialize Background Tasks
     let task_runner = application::TaskRunner::new(
         fix_thumbnails_use_case.clone(),
+        index_faces_use_case.clone(),
+        group_faces_use_case.clone(),
+        search_use_case.clone(),
+        repo.clone(),
         tx.clone(),
     );
+
+    let face_indexer_wakeup = task_runner.get_wakeup_notify();
     task_runner.start();
 
     // Initialize App State
@@ -150,8 +211,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         delete_use_case,
         group_use_case,
         group_faces_use_case,
+        find_similar_faces_use_case,
+        list_people_use_case,
         tag_learning_use_case,
         fix_thumbnails_use_case,
+
         external_search_use_case,
         repo: repo.clone(),
         upload_dir: upload_dir.clone(),
@@ -159,6 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         upload_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
         login_rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         download_plans: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        face_indexer_wakeup,
         tx,
     };
 

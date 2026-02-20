@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use crate::domain::{DomainError, Face, FaceGroup, MediaSummary};
 use rusqlite::params;
 use uuid::Uuid;
@@ -26,8 +27,8 @@ impl SqliteRepository {
 
             for (face, embedding) in faces.iter().zip(embeddings.iter()) {
                 conn.execute(
-                    "INSERT INTO faces (id, media_id, box_x1, box_y1, box_x2, box_y2, cluster_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT INTO faces (id, media_id, box_x1, box_y1, box_x2, box_y2, cluster_id, person_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         face.id.as_bytes(),
                         media_id.as_bytes(),
@@ -36,6 +37,7 @@ impl SqliteRepository {
                         face.box_x2,
                         face.box_y2,
                         face.cluster_id,
+                        face.person_id.map(|p| p.as_bytes().to_vec()),
                     ],
                 ).map_err(|e| DomainError::Database(e.to_string()))?;
 

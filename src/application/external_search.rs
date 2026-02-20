@@ -152,7 +152,10 @@ mod tests {
             phash: "hash".to_string(),
             is_favorite: false,
             tags: vec![],
+            faces: vec![],
+            faces_scanned: true,
         };
+
         repo.save_metadata_and_vector(&item, None).unwrap();
         
         tokio::fs::write(upload_dir.join(&filename), b"fake image data").await.unwrap();

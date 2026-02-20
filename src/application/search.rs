@@ -5,11 +5,12 @@ use uuid::Uuid;
 pub struct SearchSimilarUseCase {
     repo: Arc<dyn MediaRepository>,
     ai: Arc<dyn AiProcessor>,
+    storage_path: std::path::PathBuf,
 }
 
 impl SearchSimilarUseCase {
-    pub fn new(repo: Arc<dyn MediaRepository>, ai: Arc<dyn AiProcessor>) -> Self {
-        Self { repo, ai }
+    pub fn new(repo: Arc<dyn MediaRepository>, ai: Arc<dyn AiProcessor>, storage_path: std::path::PathBuf) -> Self {
+        Self { repo, ai, storage_path }
     }
 
     pub async fn execute(&self, image_bytes: &[u8], limit: usize, max_distance: f32) -> Result<Vec<MediaItem>, DomainError> {
@@ -37,6 +38,24 @@ impl SearchSimilarUseCase {
             .collect();
 
         Ok(filtered)
+    }
+
+    pub async fn reindex_item(&self, item: &MediaItem) -> Result<(), DomainError> {
+        let file_path = self.storage_path.join(&item.filename);
+        if !file_path.exists() {
+            return Ok(());
+        }
+
+        let data = std::fs::read(&file_path)
+            .map_err(|e| DomainError::Io(e.to_string()))?;
+
+        // 1. Extract features
+        let vector = self.ai.extract_features(&data)?;
+
+        // 2. Update media with vector (this will use update_media_and_vector_impl)
+        self.repo.update_media_and_vector(item, Some(&vector))?;
+
+        Ok(())
     }
 }
 

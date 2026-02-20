@@ -4,7 +4,9 @@ import type { MediaFilter, Folder } from './types';
 import Sidebar from './components/Sidebar';
 import GalleryView, { type GalleryViewHandle } from './components/GalleryView';
 import SearchView from './components/SearchView';
+import PeopleView from './components/PeopleView';
 import LoginView from './components/LoginView';
+
 import LoadingIndicator from './components/LoadingIndicator';
 import { apiClient } from './api';
 import { useWebSocket } from './useWebSocket';
@@ -155,7 +157,9 @@ export default function App() {
     const isGallery = location.pathname === '/';
     const isFavorites = location.pathname === '/favorites';
     const isSearch = location.pathname.startsWith('/search');
+    const isPeople = location.pathname === '/people';
     const folderMatch = matchPath('/folders/:folderId', location.pathname);
+
     const isFolder = !!folderMatch;
     const activeFolderId = folderMatch?.params.folderId;
     const activeFolder = folders.find(f => f.id === activeFolderId) || null;
@@ -317,6 +321,17 @@ export default function App() {
                             onLogout={authRequired ? handleLogout : undefined}
                         />
                     </div>
+
+                    <div className={isPeople ? '' : 'hidden'}>
+                        <PeopleView
+                            isActive={isPeople}
+                            refreshKey={refreshKey}
+                            folders={folders}
+                            onFoldersChanged={fetchFolders}
+                            onLogout={authRequired ? handleLogout : undefined}
+                        />
+                    </div>
+
 
                     {isFolder && activeFolderId && (
                         <GalleryView

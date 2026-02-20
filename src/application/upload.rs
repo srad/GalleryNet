@@ -108,11 +108,14 @@ impl UploadMediaUseCase {
             exif_json: processed.exif_json,
             is_favorite: false,
             tags: vec![],
+            faces: Vec::new(),
+            faces_scanned: false, // Don't mark as scanned yet
         };
+
 
         self.repo.save_metadata_and_vector(&media, features.as_deref())?;
 
-        // Extract and save faces
+        // Extract and save faces immediately
         if let Some(bytes) = processed.feature_input.as_ref() {
             if let Ok(detected) = self.ai.detect_and_extract_faces(bytes) {
                 let mut face_models = Vec::with_capacity(detected.len());
@@ -131,11 +134,18 @@ impl UploadMediaUseCase {
                     face_embeddings.push(f.embedding);
                 }
 
-                if !face_models.is_empty() {
-                    self.repo.save_faces(id, &face_models, &face_embeddings)?;
-                }
+                // Use the atomic save results method which also marks as scanned
+                self.repo.save_face_indexing_results(id, &face_models, &face_embeddings)?;
+            } else {
+                // If AI failed during upload, leave faces_scanned=false
+                // the background task will try again later.
             }
+        } else {
+            // No feature input? (e.g. video frames extraction failed)
+            // Just mark as scanned so we don't keep trying.
+            self.repo.mark_faces_scanned(id)?;
         }
+
 
         Ok(media)
     }

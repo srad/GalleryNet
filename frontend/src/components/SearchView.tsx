@@ -20,23 +20,40 @@ interface SearchViewProps {
 export default function SearchView({ folders, refreshKey, onFoldersChanged, onLogout, isActive = true }: SearchViewProps) {
     const [searchParams, setSearchParams] = useSearchParams();
     const sourceId = searchParams.get('source');
+    const faceId = searchParams.get('face');
     const selectedMediaId = searchParams.get('media');
+
     const similarityParam = searchParams.get('similarity');
 
     const [searchFile, setSearchFile] = useState<File | null>(null);
     const [localSimilarity, setLocalSimilarity] = useState<number>(() =>
-        similarityParam ? parseInt(similarityParam, 10) : 70
+        similarityParam ? parseInt(similarityParam, 10) : 45
     );
+
     const [searchResults, setSearchResults] = useState<MediaItem[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [hasSearched, setHasSearched] = useState(false);
     const [activeId, setActiveId] = useState<string | null>(null);
     const [showPicker, setShowPicker] = useState(false);
 
-    // Track the last search criteria to prevent redundant searches
-    const lastSearchRef = useRef<{ source: string | null; file: File | null; sim: number } | null>(null);
+    const handleSearchByFace = useCallback(async (id: string, sim: number) => {
+        setIsSearching(true);
+        setHasSearched(true);
+        try {
+            const results = await apiClient.searchFaces(id, sim);
+            setSearchResults(results);
+        } catch (e) {
+            console.error(e);
+            alert('Face search failed');
+        } finally {
+            setIsSearching(false);
+        }
+    }, []);
+
 
     const handleSearchById = useCallback(async (id: string, sim: number) => {
         setIsSearching(true);
+        setHasSearched(true);
         try {
             const results = await apiClient.searchSimilarById(id, sim);
             setSearchResults(results);
@@ -50,6 +67,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
 
     const handleSearchByFile = useCallback(async (file: File, sim: number) => {
         setIsSearching(true);
+        setHasSearched(true);
         try {
             const results = await apiClient.searchSimilarByFile(file, sim);
             setSearchResults(results);
@@ -60,8 +78,13 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
         }
     }, []);
 
+    // Track the last search criteria to prevent redundant searches
+
+    const lastSearchRef = useRef<{ source: string | null; face: string | null; file: File | null; sim: number } | null>(null);
+
 
     // Sync local slider state when URL param changes (e.g. back/forward navigation)
+
     useEffect(() => {
         if (similarityParam) {
             const val = parseInt(similarityParam, 10);
@@ -73,23 +96,27 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
 
     // Main search trigger effect
     useEffect(() => {
+        // Use the similarity from URL if present, otherwise use the local state (only on initial load or source change)
         const currentSim = similarityParam ? parseInt(similarityParam, 10) : localSimilarity;
 
         const currentSource = sourceId;
+        const currentFace = faceId;
         const currentFile = searchFile;
 
         // Check if anything meaningful changed
         const last = lastSearchRef.current;
         const changed = !last ||
                         last.source !== currentSource ||
+                        last.face !== currentFace ||
                         last.file !== currentFile ||
                         last.sim !== currentSim;
 
         if (!changed) return;
 
         // Reset search results if source is cleared
-        if (!currentSource && !currentFile) {
+        if (!currentSource && !currentFile && !currentFace) {
             setSearchResults([]);
+            setHasSearched(false);
             setActiveId(null);
             lastSearchRef.current = null;
             return;
@@ -100,13 +127,18 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
             setActiveId(currentSource);
             setSearchFile(null);
             handleSearchById(currentSource, currentSim);
+        } else if (currentFace) {
+            setActiveId(null);
+            setSearchFile(null);
+            handleSearchByFace(currentFace, currentSim);
         } else if (currentFile) {
             setActiveId(null);
             handleSearchByFile(currentFile, currentSim);
         }
 
-        lastSearchRef.current = { source: currentSource, file: currentFile, sim: currentSim };
-    }, [sourceId, similarityParam, searchFile, handleSearchById, handleSearchByFile, localSimilarity]);
+        lastSearchRef.current = { source: currentSource, face: currentFace, file: currentFile, sim: currentSim };
+    }, [sourceId, faceId, similarityParam, searchFile, handleSearchById, handleSearchByFile, handleSearchByFace]);
+
 
     const handleSimilarityCommit = useCallback(() => {
         setSearchParams(prev => {
@@ -119,12 +151,15 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
     const clearSearch = () => {
         setSearchFile(null);
         setSearchResults([]);
+        setHasSearched(false);
         setSearchParams(prev => {
             const next = new URLSearchParams(prev);
             next.delete('source');
+            next.delete('face');
             return next;
         });
     };
+
 
     const handleCardClick = useCallback((item: MediaItem) => {
         if (item.id) {
@@ -252,7 +287,26 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                                     </button>
                                 </div>
                             </div>
+                        ) : faceId ? (
+                            <div className="flex items-center gap-4 p-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-900">
+                                <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900 rounded-lg flex items-center justify-center">
+                                    <svg className="w-8 h-8 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1">
+                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Searching by identified person</p>
+                                    <button
+                                        onClick={clearSearch}
+                                        className="text-xs text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 font-semibold mt-1"
+                                    >
+                                        Clear / Pick New
+                                    </button>
+                                </div>
+                            </div>
                         ) : searchFile ? (
+
                             <div className="flex items-center gap-4 p-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-900">
                                 <div className="w-16 h-16 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
                                     <PhotoIcon className="w-8 h-8 text-purple-600 dark:text-purple-400" />
@@ -304,9 +358,10 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                         <input
                             id="similarity"
                             type="range"
-                            min="50"
+                            min="30"
                             max="100"
                             value={localSimilarity}
+
                             onChange={(e) => setLocalSimilarity(Number(e.target.value))}
                             onPointerUp={handleSimilarityCommit}
                             onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') handleSimilarityCommit(); }}
@@ -352,6 +407,13 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                                 size="lg"
                                 color="text-purple-600"
                             />
+                        ) : hasSearched ? (
+                            <div className="flex flex-col items-center gap-3">
+                                <svg className="w-12 h-12 text-gray-200 dark:text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 9.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span className="text-sm text-center max-w-xs">No matches found. Try lowering the similarity threshold.</span>
+                            </div>
                         ) : (
                             <div className="flex flex-col items-center gap-3">
                                 <PhotoIcon className="w-12 h-12 text-gray-200 dark:text-gray-700" />
@@ -360,6 +422,7 @@ export default function SearchView({ folders, refreshKey, onFoldersChanged, onLo
                         )}
                     </div>
                 )}
+
             </div>
 
             {showPicker && (

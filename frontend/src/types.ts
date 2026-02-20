@@ -22,7 +22,9 @@ export interface MediaItem {
     exif_json?: string;
     is_favorite?: boolean;
     tags?: TagDetail[];
+    faces?: Face[];
 }
+
 
 export type MediaFilter = 'all' | 'image' | 'video';
 
@@ -39,7 +41,24 @@ export interface MediaGroup {
     items: MediaItem[];
 }
 
+export interface Face {
+    id: string;
+    media_id: string;
+    box_x1: number;
+    box_y1: number;
+    box_x2: number;
+    box_y2: number;
+    cluster_id?: number;
+}
+
+export interface PersonSummary {
+    cluster_id: number;
+    representative_media: MediaItem;
+    representative_face: Face;
+}
+
 export interface Stats {
+
     version: string;
     total_files: number;
     total_images: number;

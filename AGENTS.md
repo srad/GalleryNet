@@ -119,8 +119,10 @@ CREATE TABLE media (
     width INTEGER,
     height INTEGER,
     size_bytes INTEGER NOT NULL,
-    exif_json TEXT
+    exif_json TEXT,
+    faces_scanned BOOLEAN NOT NULL DEFAULT 0
 );
+
 
 -- Vector index (cosine distance)
 CREATE VIRTUAL TABLE vec_media USING vec0(
@@ -310,6 +312,14 @@ External: `ffmpeg` (video frame extraction).
 
 - Disk space detection is platform-conditional: `GetDiskFreeSpaceExW` on Windows, `libc::statvfs` on Linux/macOS
 
+### Verification Protocol (Mandatory)
+Before finishing any task, the agent MUST:
+1.  **Baseline**: Check the current test count: `cargo test -- --list | grep ": test" | wc -l`.
+2.  **Verify**: Run `./scripts/verify.sh` (or `.ps1`).
+3.  **Compare**: Ensure the test count has NOT decreased.
+4.  **Edit vs Write**: ALWAYS prefer the `Edit` tool for existing files. NEVER use `Write` on an existing source file unless the entire file is being intentionally replaced and all existing tests/logic have been merged.
+
 - App version is read from `Cargo.toml` at compile time via `env!("CARGO_PKG_VERSION")`
+
 - The ONNX model must be re-exported if changing the feature extraction architecture (see `scripts/mobilenetv3_export.py`, requires Python with `torch`, `timm`, `onnx`)
 - **Dialogs**: Always use `ConfirmDialog.tsx` for confirmations (delete, destructive actions) and `AlertDialog.tsx` for alerts/notifications. Avoid using the native `window.alert` or `window.confirm`.

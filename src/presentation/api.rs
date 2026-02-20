@@ -29,8 +29,9 @@ use tokio::io::AsyncWriteExt;
 use crate::application::{
     DeleteMediaUseCase, ExternalSearchUseCase, FixThumbnailsUseCase, GroupFacesUseCase,
     GroupMediaUseCase, ListMediaUseCase, SearchSimilarUseCase, TagLearningUseCase,
-    UploadMediaUseCase,
+    UploadMediaUseCase, FindSimilarFacesUseCase, ListPeopleUseCase,
 };
+
 use crate::domain::{DomainError, MediaItem, MediaRepository};
 use crate::presentation::auth::AuthConfig;
 
@@ -97,7 +98,10 @@ pub struct AppState {
     pub delete_use_case: Arc<DeleteMediaUseCase>,
     pub group_use_case: Arc<GroupMediaUseCase>,
     pub group_faces_use_case: Arc<GroupFacesUseCase>,
+    pub find_similar_faces_use_case: Arc<FindSimilarFacesUseCase>,
+    pub list_people_use_case: Arc<ListPeopleUseCase>,
     pub tag_learning_use_case: Arc<TagLearningUseCase>,
+
     pub fix_thumbnails_use_case: Arc<FixThumbnailsUseCase>,
     pub external_search_use_case: Arc<ExternalSearchUseCase>,
     pub repo: Arc<dyn MediaRepository>,
@@ -106,8 +110,10 @@ pub struct AppState {
     pub upload_semaphore: Arc<Semaphore>,
     pub login_rate_limiter: Arc<Mutex<HashMap<IpAddr, (u32, Instant)>>>,
     pub download_plans: Arc<Mutex<HashMap<String, DownloadPlan>>>,
+    pub face_indexer_wakeup: Arc<tokio::sync::Notify>,
     pub tx: broadcast::Sender<Arc<str>>,
 }
+
 
 impl AppState {
     pub fn broadcast(&self, msg: WsMessage) {
@@ -180,7 +186,13 @@ pub struct Pagination {
     pub limit: Option<usize>,
     pub media_type: Option<String>,
     pub favorite: Option<bool>,
-    pub tags: Option<String>, // Comma-separated
+    pub tags: Option<String>,
+    pub person_id: Option<Uuid>,
+    pub cluster_id: Option<i64>, // Comma-separated
+    pub person_id: Option<Uuid>,
+    pub cluster_id: Option<i64>,
+    pub person_id: Option<Uuid>,
+    pub cluster_id: Option<i64>,
     /// Sort direction: "asc" or "desc" (default "desc")
     pub sort: Option<String>,
     /// Sort field: "date" or "size" (default "date")
@@ -200,12 +212,16 @@ async fn list_handler(
     let sort_asc = pagination.sort.as_deref() == Some("asc");
     let sort_by = pagination.sort_by.as_deref().unwrap_or("date");
     let favorite = pagination.favorite.unwrap_or(false);
+    let person_id = pagination.person_id;
+    let cluster_id = pagination.cluster_id;
+    let person_id = pagination.person_id;
+    let cluster_id = pagination.cluster_id;
 
     let tags = pagination.tags.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
 
-    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, tags, sort_asc, sort_by).await?;
+    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, tags, person_id, cluster_id, sort_asc, sort_by).await?;
 
     Ok(Json(results))
 }
@@ -290,7 +306,14 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media/download/stream/{part_id}", get(batch_download_stream_handler))
         .route("/media/group", post(group_media_handler))
         .route("/media/faces/group", post(group_faces_handler))
+        .route("/media/faces/search", post(search_faces_handler))
+        .route("/media/faces/people", get(list_people_handler))
+        .route("/people", get(list_named_people_handler).post(create_person_handler))
+        .route("/people/{id}", put(rename_person_handler).delete(delete_person_handler))
+        .route("/media/faces/{id}/name", post(name_face_handler))
+        .route("/media/faces/clusters/{id}/name", post(name_cluster_handler))
         .route("/media/fix-thumbnails", post(fix_thumbnails_handler))
+
 
         .route("/media/{id}", get(get_media_handler).delete(delete_handler))
         .route("/media/{id}/search-external", post(external_search_handler))
@@ -640,8 +663,10 @@ async fn upload_handler(
     }
 
     state.broadcast(WsMessage::UploadComplete);
+    state.face_indexer_wakeup.notify_one();
     Ok((StatusCode::CREATED, Json(serde_json::to_value(results).unwrap())))
 }
+
 
 async fn search_handler(
     State(state): State<AppState>,
@@ -1306,6 +1331,30 @@ async fn group_faces_handler(
     Ok(Json(groups))
 }
 
+#[derive(Deserialize)]
+pub struct FaceSearchRequest {
+    pub face_id: Uuid,
+    pub similarity: Option<f32>, // 0-100%
+}
+
+async fn search_faces_handler(
+    State(state): State<AppState>,
+    Json(body): Json<FaceSearchRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    let similarity = body.similarity.unwrap_or(60.0);
+    let threshold = similarity / 100.0;
+    let results = state.find_similar_faces_use_case.execute(body.face_id, threshold).await?;
+    Ok(Json(results))
+}
+
+async fn list_people_handler(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, DomainError> {
+    let results = state.list_people_use_case.execute().await?;
+    Ok(Json(results))
+}
+
+
 async fn fix_thumbnails_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, DomainError> {
@@ -1325,7 +1374,9 @@ async fn fix_thumbnails_handler(
             }
 
             state.broadcast(WsMessage::ThumbnailFixCompleted { count: fixed_count });
+            state.face_indexer_wakeup.notify_one();
             Ok(Json(json!({ "fixed_count": fixed_count })))
+
         }
         Err(e) => {
             state.broadcast(WsMessage::ThumbnailFixCompleted { count: 0 });
@@ -1412,6 +1463,8 @@ struct FolderPagination {
     sort_by: Option<String>,
     favorite: Option<bool>,
     tags: Option<String>,
+    pub person_id: Option<Uuid>,
+    pub cluster_id: Option<i64>,
 }
 
 async fn list_folder_media_handler(
@@ -1425,12 +1478,16 @@ async fn list_folder_media_handler(
     let sort_asc = pagination.sort.as_deref() == Some("asc");
     let sort_by = pagination.sort_by.as_deref().unwrap_or("date");
     let favorite = pagination.favorite.unwrap_or(false);
+    let person_id = pagination.person_id;
+    let cluster_id = pagination.cluster_id;
+    let person_id = pagination.person_id;
+    let cluster_id = pagination.cluster_id;
 
     let tags = pagination.tags.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
 
-    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), favorite, tags, sort_asc, sort_by)?;
+    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), favorite, tags, person_id, cluster_id, sort_asc, sort_by)?;
     Ok(Json(results))
 }
 
@@ -1617,7 +1674,9 @@ mod tests {
             search_use_case: Arc::new(crate::application::SearchSimilarUseCase::new(
                 Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
                 Arc::new(crate::infrastructure::OrtProcessor::new_empty()),
+                PathBuf::from("uploads"),
             )),
+
             list_use_case: Arc::new(crate::application::ListMediaUseCase::new(
                 Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
             )),
@@ -1632,7 +1691,14 @@ mod tests {
             group_faces_use_case: Arc::new(crate::application::GroupFacesUseCase::new(
                 Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
             )),
+            find_similar_faces_use_case: Arc::new(crate::application::FindSimilarFacesUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            )),
+            list_people_use_case: Arc::new(crate::application::ListPeopleUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            )),
             tag_learning_use_case: Arc::new(crate::application::TagLearningUseCase::new(
+
                 Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
             )),
             fix_thumbnails_use_case: Arc::new(crate::application::FixThumbnailsUseCase::new(
@@ -1652,7 +1718,9 @@ mod tests {
             upload_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
             login_rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             download_plans: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            face_indexer_wakeup: Arc::new(tokio::sync::Notify::new()),
             tx: tx.clone(),
+
         };
 
         let app = app_router(state.clone());
@@ -1682,4 +1750,80 @@ mod tests {
             panic!("Received wrong WS message type");
         }
     }
+}
+
+// ==================== People endpoints ====================
+
+#[derive(Deserialize)]
+struct CreatePersonRequest {
+    name: String,
+}
+
+async fn create_person_handler(
+    State(state): State<AppState>,
+    Json(body): Json<CreatePersonRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Err(DomainError::Io("Person name cannot be empty".to_string()));
+    }
+    let id = Uuid::new_v4();
+    let person = state.repo.create_person(id, name)?;
+    Ok((StatusCode::CREATED, Json(person)))
+}
+
+async fn list_named_people_handler(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, DomainError> {
+    let people = state.repo.list_people()?;
+    Ok(Json(people))
+}
+
+async fn delete_person_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.repo.delete_person(id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn rename_person_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CreatePersonRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Err(DomainError::Io("Person name cannot be empty".to_string()));
+    }
+    state.repo.rename_person(id, name)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct NameFaceRequest {
+    person_id: Option<Uuid>,
+}
+
+async fn name_face_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<NameFaceRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.repo.name_face(id, body.person_id)?;
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct NameClusterRequest {
+    person_id: Option<Uuid>,
+}
+
+async fn name_cluster_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<NameClusterRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.repo.name_cluster(id, body.person_id)?;
+    Ok(StatusCode::OK)
 }

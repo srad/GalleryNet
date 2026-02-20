@@ -21,8 +21,8 @@ pub struct ProcessedMedia {
     pub phash: String,
     pub feature_input: Option<Vec<u8>>,
     pub original_date: Option<DateTime<Utc>>,
-    pub detected_faces: Vec<crate::domain::DetectedFace>,
 }
+
 
 /// Load an image with dimension and allocation limits to prevent pixel bombs.
 pub fn load_image_with_limits(data: &[u8]) -> Result<image::DynamicImage, DomainError> {
@@ -255,6 +255,6 @@ pub async fn process_media(
         phash,
         feature_input,
         original_date,
-        detected_faces: Vec::new(),
     })
 }
+

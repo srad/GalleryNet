@@ -10,6 +10,9 @@ pub mod processor;
 pub mod maintenance;
 #[cfg(test)]
 mod maintenance_test;
+#[cfg(test)]
+mod face_search_test;
+
 
 pub use delete::*;
 pub use group::*;

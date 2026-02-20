@@ -51,7 +51,8 @@ impl SqliteRepository {
                 width INTEGER,
                 height INTEGER,
                 size_bytes INTEGER NOT NULL,
-                exif_json TEXT
+                exif_json TEXT,
+                faces_scanned BOOLEAN NOT NULL DEFAULT 0
             )",
             [],
         )
@@ -80,6 +81,32 @@ impl SqliteRepository {
             [],
         )
         .map_err(|e| DomainError::Database(format!("Failed to create faces table: {}", e)))?;
+        println!("Ensuring people table exists...");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS people (
+                id BLOB PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| DomainError::Database(format!("Failed to create people table: {}", e)))?;
+
+        let has_person_id: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('faces') WHERE name='person_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if has_person_id == 0 {
+            println!("Adding person_id column to faces...");
+            let _ = conn.execute(
+                "ALTER TABLE faces ADD COLUMN person_id BLOB REFERENCES people(id) ON DELETE SET NULL",
+                [],
+            );
+        }
 
         println!("Ensuring vec_faces virtual table exists...");
         // Using 512-d for ArcFace (w600k_mbf)
@@ -237,6 +264,22 @@ impl SqliteRepository {
             );
         }
 
+        let has_faces_scanned: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('media') WHERE name='faces_scanned'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if has_faces_scanned == 0 {
+            println!("Adding faces_scanned column to media...");
+            let _ = conn.execute(
+                "ALTER TABLE media ADD COLUMN faces_scanned BOOLEAN NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+
         println!("Ensuring idx_media_tags_tag_id index exists...");
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_media_tags_tag_id ON media_tags(tag_id)",
@@ -261,15 +304,18 @@ impl SqliteRepository {
         let conn = Connection::open(path)
             .map_err(|e| DomainError::Database(format!("Failed to open connection: {}", e)))?;
 
-        // Use standard journaling for maximum compatibility with Docker bind mounts on Windows
-        // Use query_row for PRAGMAs that return values to avoid "Execute returned results" warnings
+        // Use Write-Ahead Logging (WAL) for significantly better concurrency
         let _: String = conn
-            .query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))
-            .unwrap_or_else(|_| "DELETE".to_string());
+            .query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))
+            .unwrap_or_else(|_| "WAL".to_string());
 
+        // Increased busy timeout to 30 seconds to handle heavy background tasks
         let _: i64 = conn
-            .query_row("PRAGMA busy_timeout=10000", [], |r| r.get(0))
-            .unwrap_or(10000);
+            .query_row("PRAGMA busy_timeout=30000", [], |r| r.get(0))
+            .unwrap_or(30000);
+
+        // Synchronization mode NORMAL is recommended for WAL
+        let _ = conn.execute("PRAGMA synchronous=NORMAL", []);
 
         Ok(conn)
     }
@@ -356,10 +402,12 @@ impl MediaRepository for SqliteRepository {
         media_type: Option<&str>,
         favorite: bool,
         tags: Option<Vec<String>>,
+        person_id: Option<uuid::Uuid>,
+        cluster_id: Option<i64>,
         sort_asc: bool,
         sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
-        self.find_all_impl(limit, offset, media_type, favorite, tags, sort_asc, sort_by)
+        self.find_all_impl(limit, offset, media_type, favorite, tags, person_id, cluster_id, sort_asc, sort_by)
     }
 
     fn media_counts(&self) -> Result<MediaCounts, DomainError> {
@@ -434,11 +482,13 @@ impl MediaRepository for SqliteRepository {
         media_type: Option<&str>,
         favorite: bool,
         tags: Option<Vec<String>>,
+        person_id: Option<uuid::Uuid>,
+        cluster_id: Option<i64>,
         sort_asc: bool,
         sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
         self.find_all_in_folder_impl(
-            folder_id, limit, offset, media_type, favorite, tags, sort_asc, sort_by,
+            folder_id, limit, offset, media_type, favorite, tags, person_id, cluster_id, sort_asc, sort_by,
         )
     }
 
@@ -538,6 +588,23 @@ impl MediaRepository for SqliteRepository {
         self.find_media_without_phash_impl()
     }
 
+    fn find_media_unscanned_faces(&self, limit: usize) -> Result<Vec<MediaItem>, DomainError> {
+        self.find_media_unscanned_faces_impl(limit)
+    }
+
+    fn mark_faces_scanned(&self, id: uuid::Uuid) -> Result<(), DomainError> {
+        self.mark_faces_scanned_impl(id)
+    }
+
+    fn save_face_indexing_results(
+        &self,
+        media_id: uuid::Uuid,
+        faces: &[crate::domain::Face],
+        embeddings: &[Vec<f32>],
+    ) -> Result<(), DomainError> {
+        self.save_face_indexing_results_impl(media_id, faces, embeddings)
+    }
+
     fn save_faces(
         &self,
         media_id: uuid::Uuid,
@@ -553,6 +620,18 @@ impl MediaRepository for SqliteRepository {
         self.get_all_face_embeddings_impl()
     }
 
+    fn get_face_embedding(&self, id: uuid::Uuid) -> Result<Vec<f32>, DomainError> {
+        self.get_face_embedding_impl(id)
+    }
+
+    fn get_nearest_face_embeddings(
+        &self,
+        vector: &[f32],
+        limit: usize,
+    ) -> Result<Vec<(uuid::Uuid, uuid::Uuid, f32)>, DomainError> {
+        self.get_nearest_face_embeddings_impl(vector, limit)
+    }
+
     fn update_face_clusters(
         &self,
         face_ids_with_clusters: &[(uuid::Uuid, i64)],
@@ -563,9 +642,53 @@ impl MediaRepository for SqliteRepository {
     fn get_face_groups(&self) -> Result<Vec<crate::domain::FaceGroup>, DomainError> {
         self.get_face_groups_impl()
     }
+
+    fn get_cluster_representatives(
+        &self,
+    ) -> Result<Vec<(i64, MediaItem, crate::domain::Face)>, DomainError> {
+        self.get_cluster_representatives_impl()
+    }
+
+    fn find_media_missing_embeddings(&self) -> Result<Vec<MediaItem>, DomainError> {
+        self.find_media_missing_embeddings_impl()
+    }
+
+    fn get_media_items_by_ids(&self, ids: &[uuid::Uuid]) -> Result<Vec<MediaItem>, DomainError> {
+        self.get_media_items_by_ids_impl(ids)
+    }
+
+    fn reset_face_index(&self) -> Result<(), DomainError> {
+        self.reset_face_index_impl()
+    }
+
+    fn create_person(&self, id: uuid::Uuid, name: &str) -> Result<crate::domain::Person, DomainError> {
+        self.create_person_impl(id, name)
+    }
+
+    fn list_people(&self) -> Result<Vec<crate::domain::Person>, DomainError> {
+        self.list_people_impl()
+    }
+
+    fn delete_person(&self, id: uuid::Uuid) -> Result<(), DomainError> {
+        self.delete_person_impl(id)
+    }
+
+    fn rename_person(&self, id: uuid::Uuid, name: &str) -> Result<(), DomainError> {
+        self.rename_person_impl(id, name)
+    }
+
+    fn name_face(&self, face_id: uuid::Uuid, person_id: Option<uuid::Uuid>) -> Result<(), DomainError> {
+        self.name_face_impl(face_id, person_id)
+    }
+
+    fn name_cluster(&self, cluster_id: i64, person_id: Option<uuid::Uuid>) -> Result<(), DomainError> {
+        self.name_cluster_impl(cluster_id, person_id)
+    }
 }
 
 // ---- Tag helpers shared across submodules ----
+
+pub(crate) use faces::{load_faces_bulk, load_faces_for_media};
 
 /// Load tags for a single media item (by UUID bytes).
 pub(crate) fn load_tags_for_media(conn: &Connection, media_id: &[u8]) -> Vec<TagDetail> {

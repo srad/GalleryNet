@@ -144,26 +144,17 @@ impl SqliteRepository {
 
     pub(crate) fn delete_folder_impl(&self, id: Uuid) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|e| DomainError::Database(e.to_string()))?;
-
-            tx.execute(
+            conn.execute(
                 "DELETE FROM folder_media WHERE folder_id = ?1",
                 params![id.as_bytes()],
             )
             .map_err(|e| DomainError::Database(e.to_string()))?;
-
-            let deleted = tx
+            let deleted = conn
                 .execute("DELETE FROM folders WHERE id = ?1", params![id.as_bytes()])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
-
             if deleted == 0 {
                 return Err(DomainError::NotFound);
             }
-
-            tx.commit()
-                .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })
     }
@@ -185,22 +176,13 @@ impl SqliteRepository {
 
     pub(crate) fn reorder_folders_impl(&self, order: &[(Uuid, i64)]) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
+            let mut stmt = conn
+                .prepare("UPDATE folders SET sort_order = ?1 WHERE id = ?2")
                 .map_err(|e| DomainError::Database(e.to_string()))?;
-
-            {
-                let mut stmt = tx
-                    .prepare("UPDATE folders SET sort_order = ?1 WHERE id = ?2")
+            for (id, sort_order) in order {
+                stmt.execute(params![sort_order, id.as_bytes()])
                     .map_err(|e| DomainError::Database(e.to_string()))?;
-                for (id, sort_order) in order {
-                    stmt.execute(params![sort_order, id.as_bytes()])
-                        .map_err(|e| DomainError::Database(e.to_string()))?;
-                }
             }
-
-            tx.commit()
-                .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })
     }
@@ -211,24 +193,18 @@ impl SqliteRepository {
         media_ids: &[Uuid],
     ) -> Result<usize, DomainError> {
         self.with_conn(|conn| {
-            let tx = conn.transaction().map_err(|e| DomainError::Database(e.to_string()))?;
             let now = Utc::now().to_rfc3339();
             let mut added = 0usize;
-            
-            {
-                let mut stmt = tx.prepare("INSERT OR IGNORE INTO folder_media (folder_id, media_id, added_at) VALUES (?1, ?2, ?3)")
-                    .map_err(|e| DomainError::Database(e.to_string()))?;
-                
-                for media_id in media_ids {
-                    let res = stmt.execute(params![folder_id.as_bytes(), media_id.as_bytes(), now]);
-                    match res {
-                        Ok(n) => added += n,
-                        Err(e) => return Err(DomainError::Database(e.to_string())),
-                    }
+            for media_id in media_ids {
+                let res = conn.execute(
+                    "INSERT OR IGNORE INTO folder_media (folder_id, media_id, added_at) VALUES (?1, ?2, ?3)",
+                    params![folder_id.as_bytes(), media_id.as_bytes(), now],
+                );
+                match res {
+                    Ok(n) => added += n,
+                    Err(e) => return Err(DomainError::Database(e.to_string())),
                 }
             }
-
-            tx.commit().map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(added)
         })
     }
@@ -239,26 +215,16 @@ impl SqliteRepository {
         media_ids: &[Uuid],
     ) -> Result<usize, DomainError> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|e| DomainError::Database(e.to_string()))?;
             let mut removed = 0usize;
-
-            {
-                let mut stmt = tx
-                    .prepare("DELETE FROM folder_media WHERE folder_id = ?1 AND media_id = ?2")
+            for media_id in media_ids {
+                let n = conn
+                    .execute(
+                        "DELETE FROM folder_media WHERE folder_id = ?1 AND media_id = ?2",
+                        params![folder_id.as_bytes(), media_id.as_bytes()],
+                    )
                     .map_err(|e| DomainError::Database(e.to_string()))?;
-
-                for media_id in media_ids {
-                    let n = stmt
-                        .execute(params![folder_id.as_bytes(), media_id.as_bytes()])
-                        .map_err(|e| DomainError::Database(e.to_string()))?;
-                    removed += n;
-                }
+                removed += n;
             }
-
-            tx.commit()
-                .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(removed)
         })
     }
@@ -273,8 +239,6 @@ impl SqliteRepository {
         tags: Option<Vec<String>>,
         person_id: Option<Uuid>,
         cluster_id: Option<i64>,
-        person_id: Option<Uuid>,
-        cluster_id: Option<i64>,
         sort_asc: bool,
         sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
@@ -285,7 +249,7 @@ impl SqliteRepository {
                 _ => "m.original_date",
             };
 
-            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite, m.size_bytes
+            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite, m.size_bytes, m.width, m.height
                            FROM media m
                            JOIN folder_media fm ON fm.media_id = m.id
                            LEFT JOIN favorites f ON f.media_id = m.id
@@ -304,18 +268,18 @@ impl SqliteRepository {
                 sql.push_str(" AND f.media_id IS NOT NULL");
             }
 
-            // Tag filtering: media must have ANY of the specified tags (OR)
-            
             if let Some(pid) = person_id {
-                sql.push_str(" AND EXISTS (SELECT 1 FROM faces f2 WHERE f2.media_id = m.id AND f2.person_id = ?)");
+                sql.push_str(" AND EXISTS (SELECT 1 FROM faces fs WHERE fs.media_id = m.id AND fs.person_id = ?)");
                 params_vec.push(Box::new(pid.as_bytes().to_vec()));
             }
 
             if let Some(cid) = cluster_id {
-                sql.push_str(" AND EXISTS (SELECT 1 FROM faces f2 WHERE f2.media_id = m.id AND f2.cluster_id = ?)");
+                sql.push_str(" AND EXISTS (SELECT 1 FROM faces fs WHERE fs.media_id = m.id AND fs.cluster_id = ?)");
                 params_vec.push(Box::new(cid));
             }
 
+
+            // Tag filtering: media must have ANY of the specified tags (OR)
             if let Some(ref tag_list) = tags {
                 if !tag_list.is_empty() {
                     let placeholders: Vec<String> = tag_list.iter().map(|_| "?".to_string()).collect();
@@ -352,6 +316,8 @@ impl SqliteRepository {
                     let original_date_str: String = row.get(5)?;
                     let is_favorite: bool = row.get(6)?;
                     let size_bytes: i64 = row.get(7)?;
+                    let width: Option<u32> = row.get(8)?;
+                    let height: Option<u32> = row.get(9)?;
 
                     let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -385,13 +351,16 @@ impl SqliteRepository {
                             id,
                             filename,
                             original_filename,
-                            media_type,
-                            uploaded_at,
-                            original_date,
-                            size_bytes,
-                            is_favorite,
-                            tags: vec![],
-                        },
+                        media_type,
+                        uploaded_at,
+                        original_date,
+                        width,
+                        height,
+                        size_bytes,
+                        is_favorite,
+                        tags: vec![],
+                    },
+
                     ))
                 })
                 .map_err(|e| DomainError::Database(e.to_string()))?;
@@ -428,7 +397,7 @@ impl SqliteRepository {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, m.size_bytes
+                    "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, m.size_bytes, m.width, m.height
                  FROM media m
                  JOIN folder_media fm ON fm.media_id = m.id
                  WHERE fm.folder_id = ?1",
@@ -444,6 +413,8 @@ impl SqliteRepository {
                     let timestamp_str: String = row.get(4)?;
                     let original_date_str: String = row.get(5)?;
                     let size_bytes: i64 = row.get(6)?;
+                    let width: Option<u32> = row.get(7)?;
+                    let height: Option<u32> = row.get(8)?;
 
                     let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -478,6 +449,8 @@ impl SqliteRepository {
                         media_type,
                         uploaded_at,
                         original_date,
+                        width,
+                        height,
                         size_bytes,
                         is_favorite: false,
                         tags: vec![],
@@ -650,7 +623,9 @@ mod tests {
         // Verify listing
         let items = db
             .repo
-            .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id, 10, 0, None, false, None, None, None, false, "date",
+            )
             .unwrap();
         assert_eq!(items.len(), 3);
 
@@ -663,9 +638,12 @@ mod tests {
 
         let items = db
             .repo
-            .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id, 10, 0, None, false, None, None, None, false, "date",
+            )
             .unwrap();
         assert_eq!(items.len(), 2);
+
         assert!(!items.iter().any(|m| m.id == id2));
     }
 
@@ -689,7 +667,9 @@ mod tests {
         // Still only 1 item
         let items = db
             .repo
-            .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id, 10, 0, None, false, None, None, None, false, "date",
+            )
             .unwrap();
         assert_eq!(items.len(), 1);
     }
@@ -745,14 +725,36 @@ mod tests {
 
         let images = db
             .repo
-            .find_all_in_folder_impl(folder_id, 10, 0, Some("image"), false, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id,
+                10,
+                0,
+                Some("image"),
+                false,
+                None,
+                None,
+                None,
+                false,
+                "date",
+            )
             .unwrap();
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].id, img);
 
         let videos = db
             .repo
-            .find_all_in_folder_impl(folder_id, 10, 0, Some("video"), false, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id,
+                10,
+                0,
+                Some("video"),
+                false,
+                None,
+                None,
+                None,
+                false,
+                "date",
+            )
             .unwrap();
         assert_eq!(videos.len(), 1);
         assert_eq!(videos[0].id, vid);
@@ -775,7 +777,9 @@ mod tests {
 
         let favs = db
             .repo
-            .find_all_in_folder_impl(folder_id, 10, 0, None, true, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id, 10, 0, None, true, None, None, None, false, "date",
+            )
             .unwrap();
         assert_eq!(favs.len(), 1);
         assert_eq!(favs[0].id, id1);
@@ -807,6 +811,8 @@ mod tests {
                 None,
                 false,
                 Some(vec!["Landscape".to_string()]),
+                None,
+                None,
                 false,
                 "date",
             )
@@ -836,14 +842,18 @@ mod tests {
         // Page 1
         let p1 = db
             .repo
-            .find_all_in_folder_impl(folder_id, 3, 0, None, false, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id, 3, 0, None, false, None, None, None, false, "date",
+            )
             .unwrap();
         assert_eq!(p1.len(), 3);
 
         // Page 2
         let p2 = db
             .repo
-            .find_all_in_folder_impl(folder_id, 3, 3, None, false, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id, 3, 3, None, false, None, None, None, false, "date",
+            )
             .unwrap();
         assert_eq!(p2.len(), 3);
 
@@ -856,7 +866,9 @@ mod tests {
         // Page 3 — only 1 left
         let p3 = db
             .repo
-            .find_all_in_folder_impl(folder_id, 3, 6, None, false, None, false, "date")
+            .find_all_in_folder_impl(
+                folder_id, 3, 6, None, false, None, None, None, false, "date",
+            )
             .unwrap();
         assert_eq!(p3.len(), 1);
     }

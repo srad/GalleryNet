@@ -9,19 +9,21 @@ Hexagonal architecture with four layers:
 ```
 src/
 ├── domain/          # Models, trait ports, error types (no dependencies)
-│   ├── models.rs    # MediaItem, MediaSummary, MediaCounts, Folder, TrainedTagModel
+│   ├── models.rs    # MediaItem, MediaSummary, MediaCounts, Folder, TrainedTagModel, FaceStats
 │   └── ports.rs     # MediaRepository, AiProcessor, HashGenerator traits + DomainError
 ├── application/     # Use cases (orchestration logic)
 │   ├── upload.rs    # UploadMediaUseCase — phash check, EXIF, thumbnail, feature extraction, save
 │   ├── search.rs    # SearchSimilarUseCase — extract query features, find similar via DB
 │   ├── list.rs      # ListMediaUseCase — paginated media listing with optional media_type filter and sort
 │   ├── delete.rs    # DeleteMediaUseCase — single and batch delete (DB + files)
-│   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison (capped at 10k items, 5M edges)
-│   ├── face_group.rs # GroupFacesUseCase — Union-Find clustering of 512-d ArcFace embeddings (capped at 20k faces, 10M edges)
-│   ├── tag_learning.rs # TagLearningUseCase — Linear SVM with class-weighted training (pos_neg_weights), Platt-calibrated probabilities, hard negative mining, outlier filtering
-│   ├── maintenance.rs # FixThumbnailsUseCase — Scans for media with missing phash ('no_hash'), re-generates thumbnails, phash, features, and updates DB
-│   ├── external_search.rs # ExternalSearchUseCase — Server-side proxy for image search (Yandex). Uploads image binary directly to the search engine to avoid public leaks and bypass cookie walls.
-│   └── tasks.rs       # TaskRunner — Background scheduler for internal maintenance and cleanup
+│   ├── group.rs     # GroupMediaUseCase — Union-Find clustering with rayon-parallelized pairwise cosine comparison
+│   ├── face_group.rs # GroupFacesUseCase — Union-Find clustering of 512-d ArcFace embeddings + auto-person assignment
+│   ├── scan_faces.rs # ScanFacesUseCase — Background worker for periodic face detection on unscanned media
+│   ├── tag_learning.rs # TagLearningUseCase — Linear SVM with class-weighted training
+│   ├── maintenance.rs # FixThumbnailsUseCase — Scans for media with missing phash
+│   ├── external_search.rs # ExternalSearchUseCase — Server-side proxy for image search (Yandex)
+│   └── tasks.rs       # TaskRunner — Background scheduler for scanning, clustering, and maintenance
+
 ├── infrastructure/  # Trait implementations (adapters)
 
 │   ├── sqlite_repo/       # SQLite + sqlite-vec (connection pool, split into submodules)
@@ -241,7 +243,16 @@ Server runs on port 3000. Serves the React SPA from `frontend/dist/` as fallback
 - `POST /api/search` — Multipart with `file` (image) and `similarity` (0-100). Returns array of `MediaItem`.
 - `POST /api/media/group` — Group media by similarity. JSON body `{"folder_id": "...", "similarity": 80}`. Returns array of `MediaGroup` (groups of items).
 - `POST /api/media/faces/group` — Group media by faces. JSON body `{"similarity": 60}`. Returns array of `FaceGroup`.
+- `POST /api/media/faces/search` — JSON body `{"face_id": "...", "similarity": 60}`. Returns array of `MediaItem`.
+- `GET /api/people` — List all unique people with representative faces.
+- `GET /api/people/stats` — Detailed face and person statistics.
+- `GET /api/people/{id}` — Get single person details.
+- `PUT /api/people/{id}` — Update person (name, hidden status, representative face).
+- `DELETE /api/people/{id}` — Delete person profile.
+- `POST /api/people/{id}/merge` — Merge source person into target. JSON body `{"target_id": "..."}`.
+- `GET /api/people/{id}/media` — List all media containing this person.
 - `GET /api/tags` — List all unique tags.
+
 - `GET /api/tags/count?folder_id=...` — Count auto-tags in current view.
 - `POST /api/tags/learn` — Learn from manual tags. JSON body `{"tag_name":"..."}`. Trains a linear SVM on all manual positives for the tag, computes Platt calibration, and auto-tags the entire library.
 - `POST /api/tags/{id}/apply` — Apply learned tag model. Body `{"folder_id": "..."}`.

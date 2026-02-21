@@ -357,46 +357,57 @@ impl SqliteRepository {
         tags: Vec<String>,
     ) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
+            conn.execute("BEGIN", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
             // Remove existing tags for this media
-            tx.execute(
+            conn.execute(
                 "DELETE FROM media_tags WHERE media_id = ?1",
                 params![id.as_bytes()],
             )
-            .map_err(|e| DomainError::Database(e.to_string()))?;
+            .map_err(|e| {
+                let _ = conn.execute("ROLLBACK", []);
+                DomainError::Database(e.to_string())
+            })?;
 
             // Insert new tags
-            {
-                let mut insert_tag = tx
-                    .prepare("INSERT OR IGNORE INTO tags (name) VALUES (?1)")
-                    .unwrap();
-                let mut select_tag = tx.prepare("SELECT id FROM tags WHERE name = ?1").unwrap();
-                let mut insert_mt = tx
-                    .prepare("INSERT OR IGNORE INTO media_tags (media_id, tag_id) VALUES (?1, ?2)")
-                    .unwrap();
-
-                for tag_name in &tags {
-                    let trimmed = tag_name.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-
-                    insert_tag
-                        .execute(params![trimmed])
-                        .map_err(|e| DomainError::Database(e.to_string()))?;
-                    let tag_id: i64 = select_tag
-                        .query_row(params![trimmed], |row| row.get(0))
-                        .map_err(|e| DomainError::Database(e.to_string()))?;
-                    insert_mt
-                        .execute(params![id.as_bytes(), tag_id])
-                        .map_err(|e| DomainError::Database(e.to_string()))?;
+            for tag_name in &tags {
+                let trimmed = tag_name.trim();
+                if trimmed.is_empty() {
+                    continue;
                 }
+
+                conn.execute(
+                    "INSERT OR IGNORE INTO tags (name) VALUES (?1)",
+                    params![trimmed],
+                )
+                .map_err(|e| {
+                    let _ = conn.execute("ROLLBACK", []);
+                    DomainError::Database(e.to_string())
+                })?;
+
+                let tag_id: i64 = conn
+                    .query_row(
+                        "SELECT id FROM tags WHERE name = ?1",
+                        params![trimmed],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| {
+                        let _ = conn.execute("ROLLBACK", []);
+                        DomainError::Database(e.to_string())
+                    })?;
+
+                conn.execute(
+                    "INSERT OR IGNORE INTO media_tags (media_id, tag_id) VALUES (?1, ?2)",
+                    params![id.as_bytes(), tag_id],
+                )
+                .map_err(|e| {
+                    let _ = conn.execute("ROLLBACK", []);
+                    DomainError::Database(e.to_string())
+                })?;
             }
 
-            tx.commit()
+            conn.execute("COMMIT", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })
@@ -408,54 +419,62 @@ impl SqliteRepository {
         tags: &[String],
     ) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
+            conn.execute("BEGIN", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
             let mut tag_ids: Vec<i64> = Vec::with_capacity(tags.len());
-            {
-                let mut insert_tag = tx
-                    .prepare("INSERT OR IGNORE INTO tags (name) VALUES (?1)")
-                    .unwrap();
-                let mut select_tag = tx.prepare("SELECT id FROM tags WHERE name = ?1").unwrap();
+            for tag_name in tags {
+                let trimmed = tag_name.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
 
-                for tag_name in tags {
-                    let trimmed = tag_name.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
+                conn.execute(
+                    "INSERT OR IGNORE INTO tags (name) VALUES (?1)",
+                    params![trimmed],
+                )
+                .map_err(|e| {
+                    let _ = conn.execute("ROLLBACK", []);
+                    DomainError::Database(e.to_string())
+                })?;
 
-                    insert_tag
-                        .execute(params![trimmed])
-                        .map_err(|e| DomainError::Database(e.to_string()))?;
-                    let tag_id: i64 = select_tag
-                        .query_row(params![trimmed], |row| row.get(0))
-                        .map_err(|e| DomainError::Database(e.to_string()))?;
-                    tag_ids.push(tag_id);
+                let tag_id: i64 = conn
+                    .query_row(
+                        "SELECT id FROM tags WHERE name = ?1",
+                        params![trimmed],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| {
+                        let _ = conn.execute("ROLLBACK", []);
+                        DomainError::Database(e.to_string())
+                    })?;
+
+                tag_ids.push(tag_id);
+            }
+
+            for id in ids {
+                conn.execute(
+                    "DELETE FROM media_tags WHERE media_id = ?1",
+                    params![id.as_bytes()],
+                )
+                .map_err(|e| {
+                    let _ = conn.execute("ROLLBACK", []);
+                    DomainError::Database(e.to_string())
+                })?;
+
+                for &tag_id in &tag_ids {
+                    conn.execute(
+                        "INSERT OR IGNORE INTO media_tags (media_id, tag_id) VALUES (?1, ?2)",
+                        params![id.as_bytes(), tag_id],
+                    )
+                    .map_err(|e| {
+                        let _ = conn.execute("ROLLBACK", []);
+                        DomainError::Database(e.to_string())
+                    })?;
                 }
             }
 
-            {
-                let mut delete_mt = tx
-                    .prepare("DELETE FROM media_tags WHERE media_id = ?1")
-                    .unwrap();
-                let mut insert_mt = tx
-                    .prepare("INSERT OR IGNORE INTO media_tags (media_id, tag_id) VALUES (?1, ?2)")
-                    .unwrap();
-
-                for id in ids {
-                    delete_mt
-                        .execute(params![id.as_bytes()])
-                        .map_err(|e| DomainError::Database(e.to_string()))?;
-                    for &tag_id in &tag_ids {
-                        insert_mt
-                            .execute(params![id.as_bytes(), tag_id])
-                            .map_err(|e| DomainError::Database(e.to_string()))?;
-                    }
-                }
-            }
-
-            tx.commit()
+            conn.execute("COMMIT", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })

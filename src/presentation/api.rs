@@ -29,10 +29,10 @@ use tokio::io::AsyncWriteExt;
 use crate::application::{
     DeleteMediaUseCase, ExternalSearchUseCase, FixThumbnailsUseCase, GroupFacesUseCase,
     GroupMediaUseCase, ListMediaUseCase, SearchSimilarUseCase, TagLearningUseCase,
-    UploadMediaUseCase, FindSimilarFacesUseCase, ListPeopleUseCase,
+    UploadMediaUseCase,
 };
+use crate::domain::{DomainError, MediaItem, MediaRepository, Person};
 
-use crate::domain::{DomainError, MediaItem, MediaRepository};
 use crate::presentation::auth::AuthConfig;
 
 /// Maximum page limit for list endpoints.
@@ -87,7 +87,10 @@ pub enum WsMessage {
     FullRefresh,
     ThumbnailFixStarted,
     ThumbnailFixCompleted { count: usize },
+    PersonUpdated { id: Uuid, person: serde_json::Value },
+    PeopleMerged { source_id: Uuid, target_id: Uuid },
 }
+
 
 // App State
 #[derive(Clone)]
@@ -98,22 +101,19 @@ pub struct AppState {
     pub delete_use_case: Arc<DeleteMediaUseCase>,
     pub group_use_case: Arc<GroupMediaUseCase>,
     pub group_faces_use_case: Arc<GroupFacesUseCase>,
-    pub find_similar_faces_use_case: Arc<FindSimilarFacesUseCase>,
-    pub list_people_use_case: Arc<ListPeopleUseCase>,
     pub tag_learning_use_case: Arc<TagLearningUseCase>,
-
     pub fix_thumbnails_use_case: Arc<FixThumbnailsUseCase>,
+    pub scan_faces_use_case: Arc<crate::application::ScanFacesUseCase>,
     pub external_search_use_case: Arc<ExternalSearchUseCase>,
     pub repo: Arc<dyn MediaRepository>,
+
     pub upload_dir: PathBuf,
     pub auth_config: Option<AuthConfig>,
     pub upload_semaphore: Arc<Semaphore>,
     pub login_rate_limiter: Arc<Mutex<HashMap<IpAddr, (u32, Instant)>>>,
     pub download_plans: Arc<Mutex<HashMap<String, DownloadPlan>>>,
-    pub face_indexer_wakeup: Arc<tokio::sync::Notify>,
     pub tx: broadcast::Sender<Arc<str>>,
 }
-
 
 impl AppState {
     pub fn broadcast(&self, msg: WsMessage) {
@@ -186,11 +186,7 @@ pub struct Pagination {
     pub limit: Option<usize>,
     pub media_type: Option<String>,
     pub favorite: Option<bool>,
-    pub tags: Option<String>,
-    pub person_id: Option<Uuid>,
-    pub cluster_id: Option<i64>, // Comma-separated
-    pub person_id: Option<Uuid>,
-    pub cluster_id: Option<i64>,
+    pub tags: Option<String>, // Comma-separated
     pub person_id: Option<Uuid>,
     pub cluster_id: Option<i64>,
     /// Sort direction: "asc" or "desc" (default "desc")
@@ -212,19 +208,26 @@ async fn list_handler(
     let sort_asc = pagination.sort.as_deref() == Some("asc");
     let sort_by = pagination.sort_by.as_deref().unwrap_or("date");
     let favorite = pagination.favorite.unwrap_or(false);
-    let person_id = pagination.person_id;
-    let cluster_id = pagination.cluster_id;
-    let person_id = pagination.person_id;
-    let cluster_id = pagination.cluster_id;
 
     let tags = pagination.tags.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
 
-    let results = state.list_use_case.execute(page, limit, pagination.media_type.as_deref(), favorite, tags, person_id, cluster_id, sort_asc, sort_by).await?;
+    let results = state.list_use_case.execute(
+        page,
+        limit,
+        pagination.media_type.as_deref(),
+        favorite,
+        tags,
+        pagination.person_id,
+        pagination.cluster_id,
+        sort_asc,
+        sort_by,
+    ).await?;
 
     Ok(Json(results))
 }
+
 
 /// Sanitize a filename: strip path separators, control chars, quotes; fallback to "download" if empty.
 fn sanitize_filename(name: &str) -> String {
@@ -307,11 +310,6 @@ pub fn app_router(state: AppState) -> Router {
         .route("/media/group", post(group_media_handler))
         .route("/media/faces/group", post(group_faces_handler))
         .route("/media/faces/search", post(search_faces_handler))
-        .route("/media/faces/people", get(list_people_handler))
-        .route("/people", get(list_named_people_handler).post(create_person_handler))
-        .route("/people/{id}", put(rename_person_handler).delete(delete_person_handler))
-        .route("/media/faces/{id}/name", post(name_face_handler))
-        .route("/media/faces/clusters/{id}/name", post(name_cluster_handler))
         .route("/media/fix-thumbnails", post(fix_thumbnails_handler))
 
 
@@ -329,7 +327,14 @@ pub fn app_router(state: AppState) -> Router {
         .route("/tags/{id}/apply", post(apply_tag_handler))
         .route("/stats", get(stats_handler))
 
+        .route("/people", get(list_people_handler))
+        .route("/people/{id}", get(get_person_handler).put(update_person_handler).delete(delete_person_handler))
+        .route("/people/{id}/merge", post(merge_people_handler))
+        .route("/people/{id}/media", get(get_person_media_handler))
+        .route("/people/stats", get(get_face_stats_handler))
+
         .route("/folders", get(list_folders_handler).post(create_folder_handler))
+
         .route("/folders/reorder", put(reorder_folders_handler))
         .route("/folders/{id}", put(rename_folder_handler).delete(delete_folder_handler))
         .route("/folders/{id}/media", get(list_folder_media_handler).post(add_to_folder_handler))
@@ -663,10 +668,8 @@ async fn upload_handler(
     }
 
     state.broadcast(WsMessage::UploadComplete);
-    state.face_indexer_wakeup.notify_one();
     Ok((StatusCode::CREATED, Json(serde_json::to_value(results).unwrap())))
 }
-
 
 async fn search_handler(
     State(state): State<AppState>,
@@ -890,7 +893,111 @@ async fn batch_update_tags_handler(
     Ok(StatusCode::OK)
 }
 
+#[derive(Deserialize)]
+struct ListPeopleQuery {
+    include_hidden: Option<bool>,
+}
+
+async fn list_people_handler(
+    State(state): State<AppState>,
+    Query(query): Query<ListPeopleQuery>,
+) -> Result<impl IntoResponse, DomainError> {
+    let include_hidden = query.include_hidden.unwrap_or(false);
+    let results = state.repo.list_people(include_hidden)?;
+    Ok(Json(results))
+}
+
+async fn get_person_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, DomainError> {
+    let result = state.repo.get_person(id)?;
+    match result {
+        Some(data) => Ok(Json(data)),
+        None => Err(DomainError::NotFound),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdatePersonRequest {
+    name: Option<String>,
+    is_hidden: Option<bool>,
+    representative_face_id: Option<Uuid>,
+}
+
+async fn update_person_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdatePersonRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    // We need to fetch the existing person to merge changes or update the repo trait to support partial updates.
+    // The current repo.update_person takes a full Person struct.
+    // Person struct doesn't have representative_face_id? Let's check models.rs
+    
+    // For now, let's fetch, update, save.
+    let current_data = state.repo.get_person(id)?.ok_or(DomainError::NotFound)?;
+    let mut person = current_data.0;
+    
+    if let Some(name) = body.name {
+        person.name = name;
+    }
+    if let Some(is_hidden) = body.is_hidden {
+        person.is_hidden = is_hidden;
+    }
+    if let Some(face_id) = body.representative_face_id {
+        person.representative_face_id = Some(face_id);
+    }
+    
+    state.repo.update_person(&person)?;
+    
+    // Broadcast updated person
+    if let Ok(Some(data)) = state.repo.get_person(id) {
+        state.broadcast(WsMessage::PersonUpdated { id, person: serde_json::to_value(data).unwrap() });
+    }
+    
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_person_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.repo.delete_person(id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct MergePeopleRequest {
+    target_id: Uuid,
+}
+
+async fn merge_people_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<MergePeopleRequest>,
+) -> Result<impl IntoResponse, DomainError> {
+    state.repo.merge_people(id, body.target_id)?;
+    state.broadcast(WsMessage::PeopleMerged { source_id: id, target_id: body.target_id });
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_person_media_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, DomainError> {
+    let results = state.repo.get_person_photos(id)?;
+    Ok(Json(results))
+}
+
+async fn get_face_stats_handler(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, DomainError> {
+    let stats = state.repo.get_face_stats()?;
+    Ok(Json(stats))
+}
+
 fn create_download_plan<T: HasFilenames>(
+
     items: Vec<T>,
     upload_dir: &std::path::Path,
     base_name: &str,
@@ -1332,30 +1439,48 @@ async fn group_faces_handler(
 }
 
 #[derive(Deserialize)]
-pub struct FaceSearchRequest {
+pub struct SearchFacesRequest {
     pub face_id: Uuid,
-    pub similarity: Option<f32>, // 0-100%
+    pub similarity: Option<f32>,
 }
 
 async fn search_faces_handler(
     State(state): State<AppState>,
-    Json(body): Json<FaceSearchRequest>,
+    Json(body): Json<SearchFacesRequest>,
 ) -> Result<impl IntoResponse, DomainError> {
     let similarity = body.similarity.unwrap_or(60.0);
+    // Convert 0-100 similarity to dot product threshold (0.0-1.0)
+    // For normalized vectors, cosine similarity == dot product
     let threshold = similarity / 100.0;
-    let results = state.find_similar_faces_use_case.execute(body.face_id, threshold).await?;
-    Ok(Json(results))
-}
+    
+    // Get the face embedding
+    let target_embedding = state.repo.get_face_embedding(body.face_id)?;
+    if target_embedding.is_empty() {
+        return Err(DomainError::NotFound);
+    }
 
-async fn list_people_handler(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, DomainError> {
-    let results = state.list_people_use_case.execute().await?;
-    Ok(Json(results))
-}
+    // Find similar faces
+    let similar_faces = state.repo.get_nearest_face_embeddings(&target_embedding, 50)?;
+    
+    // Filter by threshold
+    let similar_face_ids: Vec<Uuid> = similar_faces
+        .into_iter()
+        .filter(|(_, _, distance)| *distance >= threshold)
+        .map(|(_, media_id, _)| media_id)
+        .collect();
 
+    // Get unique media items
+    let unique_media_ids: Vec<Uuid> = similar_face_ids.into_iter()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let media_items = state.repo.get_media_items_by_ids(&unique_media_ids)?;
+    Ok(Json(media_items))
+}
 
 async fn fix_thumbnails_handler(
+
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, DomainError> {
     state.broadcast(WsMessage::ThumbnailFixStarted);
@@ -1374,9 +1499,7 @@ async fn fix_thumbnails_handler(
             }
 
             state.broadcast(WsMessage::ThumbnailFixCompleted { count: fixed_count });
-            state.face_indexer_wakeup.notify_one();
             Ok(Json(json!({ "fixed_count": fixed_count })))
-
         }
         Err(e) => {
             state.broadcast(WsMessage::ThumbnailFixCompleted { count: 0 });
@@ -1463,8 +1586,8 @@ struct FolderPagination {
     sort_by: Option<String>,
     favorite: Option<bool>,
     tags: Option<String>,
-    pub person_id: Option<Uuid>,
-    pub cluster_id: Option<i64>,
+    person_id: Option<Uuid>,
+    cluster_id: Option<i64>,
 }
 
 async fn list_folder_media_handler(
@@ -1478,18 +1601,26 @@ async fn list_folder_media_handler(
     let sort_asc = pagination.sort.as_deref() == Some("asc");
     let sort_by = pagination.sort_by.as_deref().unwrap_or("date");
     let favorite = pagination.favorite.unwrap_or(false);
-    let person_id = pagination.person_id;
-    let cluster_id = pagination.cluster_id;
-    let person_id = pagination.person_id;
-    let cluster_id = pagination.cluster_id;
 
     let tags = pagination.tags.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
 
-    let results = state.repo.find_all_in_folder(folder_id, limit, offset, pagination.media_type.as_deref(), favorite, tags, person_id, cluster_id, sort_asc, sort_by)?;
+    let results = state.repo.find_all_in_folder(
+        folder_id,
+        limit,
+        offset,
+        pagination.media_type.as_deref(),
+        favorite,
+        tags,
+        pagination.person_id,
+        pagination.cluster_id,
+        sort_asc,
+        sort_by,
+    )?;
     Ok(Json(results))
 }
+
 
 async fn add_to_folder_handler(
     State(state): State<AppState>,
@@ -1665,62 +1796,57 @@ mod tests {
         let (tx, _) = broadcast::channel(16);
         let state = AppState {
             upload_use_case: Arc::new(crate::application::UploadMediaUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
                 Arc::new(crate::infrastructure::OrtProcessor::new_empty()),
                 Arc::new(crate::infrastructure::PhashGenerator::new()),
                 PathBuf::from("uploads"),
                 PathBuf::from("thumbnails"),
             )),
             search_use_case: Arc::new(crate::application::SearchSimilarUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
                 Arc::new(crate::infrastructure::OrtProcessor::new_empty()),
-                PathBuf::from("uploads"),
             )),
-
             list_use_case: Arc::new(crate::application::ListMediaUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
             )),
             delete_use_case: Arc::new(crate::application::DeleteMediaUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
                 PathBuf::from("uploads"),
                 PathBuf::from("thumbnails"),
             )),
             group_use_case: Arc::new(crate::application::GroupMediaUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
             )),
             group_faces_use_case: Arc::new(crate::application::GroupFacesUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
-            )),
-            find_similar_faces_use_case: Arc::new(crate::application::FindSimilarFacesUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
-            )),
-            list_people_use_case: Arc::new(crate::application::ListPeopleUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
             )),
             tag_learning_use_case: Arc::new(crate::application::TagLearningUseCase::new(
-
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
             )),
             fix_thumbnails_use_case: Arc::new(crate::application::FixThumbnailsUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
                 Arc::new(crate::infrastructure::OrtProcessor::new_empty()),
                 Arc::new(crate::infrastructure::PhashGenerator::new()),
                 PathBuf::from("uploads"),
                 PathBuf::from("thumbnails"),
             )),
-            external_search_use_case: Arc::new(crate::application::ExternalSearchUseCase::new(
-                Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            scan_faces_use_case: Arc::new(crate::application::ScanFacesUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
+                Arc::new(crate::infrastructure::OrtProcessor::new_empty()),
                 PathBuf::from("uploads"),
             )),
-            repo: Arc::new(crate::infrastructure::SqliteRepository::new_in_memory().unwrap()),
+            external_search_use_case: Arc::new(crate::application::ExternalSearchUseCase::new(
+                Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
+                PathBuf::from("uploads"),
+            )),
+
+            repo: Arc::new(crate::infrastructure::SqliteRepository::new(":memory:").unwrap()),
             upload_dir: PathBuf::from("uploads"),
             auth_config: None,
             upload_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
             login_rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             download_plans: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            face_indexer_wakeup: Arc::new(tokio::sync::Notify::new()),
             tx: tx.clone(),
-
         };
 
         let app = app_router(state.clone());
@@ -1737,11 +1863,16 @@ mod tests {
         let id = Uuid::new_v4();
         state.broadcast(WsMessage::MediaDeleted { id });
 
-        let msg = tokio::time::timeout(Duration::from_secs(1), ws_stream.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let msg = loop {
+            let m = tokio::time::timeout(Duration::from_secs(1), ws_stream.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            if m.is_text() {
+                break m;
+            }
+        };
 
         if let WsMessageProto::Text(text) = msg {
             assert!(text.contains("MediaDeleted"));
@@ -1749,81 +1880,6 @@ mod tests {
         } else {
             panic!("Received wrong WS message type");
         }
+
     }
-}
-
-// ==================== People endpoints ====================
-
-#[derive(Deserialize)]
-struct CreatePersonRequest {
-    name: String,
-}
-
-async fn create_person_handler(
-    State(state): State<AppState>,
-    Json(body): Json<CreatePersonRequest>,
-) -> Result<impl IntoResponse, DomainError> {
-    let name = body.name.trim();
-    if name.is_empty() {
-        return Err(DomainError::Io("Person name cannot be empty".to_string()));
-    }
-    let id = Uuid::new_v4();
-    let person = state.repo.create_person(id, name)?;
-    Ok((StatusCode::CREATED, Json(person)))
-}
-
-async fn list_named_people_handler(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, DomainError> {
-    let people = state.repo.list_people()?;
-    Ok(Json(people))
-}
-
-async fn delete_person_handler(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Result<impl IntoResponse, DomainError> {
-    state.repo.delete_person(id)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn rename_person_handler(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-    Json(body): Json<CreatePersonRequest>,
-) -> Result<impl IntoResponse, DomainError> {
-    let name = body.name.trim();
-    if name.is_empty() {
-        return Err(DomainError::Io("Person name cannot be empty".to_string()));
-    }
-    state.repo.rename_person(id, name)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Deserialize)]
-struct NameFaceRequest {
-    person_id: Option<Uuid>,
-}
-
-async fn name_face_handler(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-    Json(body): Json<NameFaceRequest>,
-) -> Result<impl IntoResponse, DomainError> {
-    state.repo.name_face(id, body.person_id)?;
-    Ok(StatusCode::OK)
-}
-
-#[derive(Deserialize)]
-struct NameClusterRequest {
-    person_id: Option<Uuid>,
-}
-
-async fn name_cluster_handler(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-    Json(body): Json<NameClusterRequest>,
-) -> Result<impl IntoResponse, DomainError> {
-    state.repo.name_cluster(id, body.person_id)?;
-    Ok(StatusCode::OK)
 }

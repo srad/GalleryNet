@@ -4,7 +4,7 @@ mod folders;
 mod media;
 mod tags;
 
-use crate::domain::DomainError;
+use crate::domain::{DomainError, FaceStats};
 use rusqlite::{params, Connection};
 use std::sync::{Condvar, Mutex};
 
@@ -18,10 +18,6 @@ pub struct SqliteRepository {
 impl SqliteRepository {
     pub fn new(path: &str) -> Result<Self, DomainError> {
         Self::new_with_conn_path(path)
-    }
-
-    pub fn new_in_memory() -> Result<Self, DomainError> {
-        Self::new_with_conn_path(":memory:")
     }
 
     fn new_with_conn_path(path: &str) -> Result<Self, DomainError> {
@@ -76,40 +72,14 @@ impl SqliteRepository {
                 box_y1 INTEGER NOT NULL,
                 box_x2 INTEGER NOT NULL,
                 box_y2 INTEGER NOT NULL,
-                cluster_id INTEGER
+                cluster_id INTEGER,
+                person_id BLOB REFERENCES people(id) ON DELETE SET NULL
             )",
             [],
         )
         .map_err(|e| DomainError::Database(format!("Failed to create faces table: {}", e)))?;
-        println!("Ensuring people table exists...");
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS people (
-                id BLOB PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL
-            )",
-            [],
-        )
-        .map_err(|e| DomainError::Database(format!("Failed to create people table: {}", e)))?;
-
-        let has_person_id: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('faces') WHERE name='person_id'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        if has_person_id == 0 {
-            println!("Adding person_id column to faces...");
-            let _ = conn.execute(
-                "ALTER TABLE faces ADD COLUMN person_id BLOB REFERENCES people(id) ON DELETE SET NULL",
-                [],
-            );
-        }
 
         println!("Ensuring vec_faces virtual table exists...");
-        // Using 512-d for ArcFace (w600k_mbf)
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS vec_faces USING vec0(
                 embedding float[512] distance_metric=cosine
@@ -118,8 +88,20 @@ impl SqliteRepository {
         )
         .map_err(|e| DomainError::Database(format!("Failed to create vec_faces table: {}", e)))?;
 
+        println!("Ensuring people table exists...");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS people (
+                id BLOB PRIMARY KEY,
+                name TEXT,
+                representative_face_id BLOB REFERENCES faces(id) ON DELETE SET NULL,
+                is_hidden BOOLEAN NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| DomainError::Database(format!("Failed to create people table: {}", e)))?;
+
         println!("Ensuring folders table exists...");
-        // Virtual folders
         conn.execute(
             "CREATE TABLE IF NOT EXISTS folders (
                 id BLOB PRIMARY KEY,
@@ -146,7 +128,6 @@ impl SqliteRepository {
         })?;
 
         println!("Ensuring favorites table exists...");
-        // Favorites
         conn.execute(
             "CREATE TABLE IF NOT EXISTS favorites (
                 media_id BLOB PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
@@ -157,7 +138,6 @@ impl SqliteRepository {
         .map_err(|e| DomainError::Database(format!("Failed to create favorites table: {}", e)))?;
 
         println!("Ensuring tags table exists...");
-        // Tags
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,37 +160,6 @@ impl SqliteRepository {
         )
         .map_err(|e| DomainError::Database(format!("Failed to create media_tags table: {}", e)))?;
 
-        println!("Checking for migrations...");
-        // Migration for existing databases
-        let has_is_auto: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('media_tags') WHERE name='is_auto'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        if has_is_auto == 0 {
-            println!("Adding is_auto column to media_tags...");
-            let _ = conn.execute(
-                "ALTER TABLE media_tags ADD COLUMN is_auto BOOLEAN NOT NULL DEFAULT 0",
-                [],
-            );
-        }
-
-        let has_confidence: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('media_tags') WHERE name='confidence'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        if has_confidence == 0 {
-            println!("Adding confidence column to media_tags...");
-            let _ = conn.execute("ALTER TABLE media_tags ADD COLUMN confidence REAL", []);
-        }
-
         println!("Ensuring tag_models table exists...");
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tag_models (
@@ -225,67 +174,6 @@ impl SqliteRepository {
             [],
         )
         .map_err(|e| DomainError::Database(format!("Failed to create tag_models table: {}", e)))?;
-
-        // Migration for trained_at_count
-        let has_trained_at_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('tag_models') WHERE name='trained_at_count'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        if has_trained_at_count == 0 {
-            println!("Adding trained_at_count column to tag_models...");
-            let _ = conn.execute(
-                "ALTER TABLE tag_models ADD COLUMN trained_at_count INTEGER NOT NULL DEFAULT 0",
-                [],
-            );
-        }
-
-        // Migration for Platt scaling coefficients
-        let has_platt_a: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('tag_models') WHERE name='platt_a'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        if has_platt_a == 0 {
-            println!("Adding Platt scaling columns to tag_models...");
-            let _ = conn.execute(
-                "ALTER TABLE tag_models ADD COLUMN platt_a REAL NOT NULL DEFAULT -2.0",
-                [],
-            );
-            let _ = conn.execute(
-                "ALTER TABLE tag_models ADD COLUMN platt_b REAL NOT NULL DEFAULT 0.0",
-                [],
-            );
-        }
-
-        let has_faces_scanned: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('media') WHERE name='faces_scanned'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        if has_faces_scanned == 0 {
-            println!("Adding faces_scanned column to media...");
-            let _ = conn.execute(
-                "ALTER TABLE media ADD COLUMN faces_scanned BOOLEAN NOT NULL DEFAULT 0",
-                [],
-            );
-        }
-
-        println!("Ensuring idx_media_tags_tag_id index exists...");
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_media_tags_tag_id ON media_tags(tag_id)",
-            [],
-        )
-        .map_err(|e| DomainError::Database(format!("Failed to create index: {}", e)))?;
 
         println!("Opening connection pool...");
         let mut connections = vec![conn];
@@ -304,17 +192,14 @@ impl SqliteRepository {
         let conn = Connection::open(path)
             .map_err(|e| DomainError::Database(format!("Failed to open connection: {}", e)))?;
 
-        // Use Write-Ahead Logging (WAL) for significantly better concurrency
         let _: String = conn
             .query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))
             .unwrap_or_else(|_| "WAL".to_string());
 
-        // Increased busy timeout to 30 seconds to handle heavy background tasks
         let _: i64 = conn
             .query_row("PRAGMA busy_timeout=30000", [], |r| r.get(0))
             .unwrap_or(30000);
 
-        // Synchronization mode NORMAL is recommended for WAL
         let _ = conn.execute("PRAGMA synchronous=NORMAL", []);
 
         Ok(conn)
@@ -343,10 +228,9 @@ impl SqliteRepository {
     }
 }
 
-// ---- MediaRepository trait implementation (delegates to submodule _impl methods) ----
-
 use crate::domain::{
-    Folder, MediaCounts, MediaItem, MediaRepository, MediaSummary, TagCount, TagDetail,
+    Face, FaceGroup, Folder, MediaCounts, MediaItem, MediaRepository, MediaSummary, Person,
+    TagCount, TagDetail, TrainedTagModel,
 };
 
 impl MediaRepository for SqliteRepository {
@@ -407,7 +291,9 @@ impl MediaRepository for SqliteRepository {
         sort_asc: bool,
         sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
-        self.find_all_impl(limit, offset, media_type, favorite, tags, person_id, cluster_id, sort_asc, sort_by)
+        self.find_all_impl(
+            limit, offset, media_type, favorite, tags, person_id, cluster_id, sort_asc, sort_by,
+        )
     }
 
     fn media_counts(&self) -> Result<MediaCounts, DomainError> {
@@ -488,7 +374,8 @@ impl MediaRepository for SqliteRepository {
         sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
         self.find_all_in_folder_impl(
-            folder_id, limit, offset, media_type, favorite, tags, person_id, cluster_id, sort_asc, sort_by,
+            folder_id, limit, offset, media_type, favorite, tags, person_id, cluster_id, sort_asc,
+            sort_by,
         )
     }
 
@@ -506,11 +393,7 @@ impl MediaRepository for SqliteRepository {
         self.get_all_embeddings_impl(folder_id)
     }
 
-    // --- Tag Learning ---
-    fn get_tag_model(
-        &self,
-        tag_id: i64,
-    ) -> Result<Option<crate::domain::TrainedTagModel>, DomainError> {
+    fn get_tag_model(&self, tag_id: i64) -> Result<Option<TrainedTagModel>, DomainError> {
         self.get_tag_model_impl(tag_id)
     }
 
@@ -588,27 +471,10 @@ impl MediaRepository for SqliteRepository {
         self.find_media_without_phash_impl()
     }
 
-    fn find_media_unscanned_faces(&self, limit: usize) -> Result<Vec<MediaItem>, DomainError> {
-        self.find_media_unscanned_faces_impl(limit)
-    }
-
-    fn mark_faces_scanned(&self, id: uuid::Uuid) -> Result<(), DomainError> {
-        self.mark_faces_scanned_impl(id)
-    }
-
-    fn save_face_indexing_results(
-        &self,
-        media_id: uuid::Uuid,
-        faces: &[crate::domain::Face],
-        embeddings: &[Vec<f32>],
-    ) -> Result<(), DomainError> {
-        self.save_face_indexing_results_impl(media_id, faces, embeddings)
-    }
-
     fn save_faces(
         &self,
         media_id: uuid::Uuid,
-        faces: &[crate::domain::Face],
+        faces: &[Face],
         embeddings: &[Vec<f32>],
     ) -> Result<(), DomainError> {
         self.save_faces_impl(media_id, faces, embeddings)
@@ -639,14 +505,29 @@ impl MediaRepository for SqliteRepository {
         self.update_face_clusters_impl(face_ids_with_clusters)
     }
 
-    fn get_face_groups(&self) -> Result<Vec<crate::domain::FaceGroup>, DomainError> {
+    fn get_face_groups(&self) -> Result<Vec<FaceGroup>, DomainError> {
         self.get_face_groups_impl()
     }
 
-    fn get_cluster_representatives(
-        &self,
-    ) -> Result<Vec<(i64, MediaItem, crate::domain::Face)>, DomainError> {
+    fn get_cluster_representatives(&self) -> Result<Vec<(i64, MediaItem, Face)>, DomainError> {
         self.get_cluster_representatives_impl()
+    }
+
+    fn find_media_unscanned_faces(&self, limit: usize) -> Result<Vec<MediaItem>, DomainError> {
+        self.find_media_unscanned_faces_impl(limit)
+    }
+
+    fn set_faces_scanned(&self, media_id: uuid::Uuid, scanned: bool) -> Result<(), DomainError> {
+        self.set_faces_scanned_impl(media_id, scanned)
+    }
+
+    fn save_face_indexing_results(
+        &self,
+        media_id: uuid::Uuid,
+        faces: &[Face],
+        embeddings: &[Vec<f32>],
+    ) -> Result<(), DomainError> {
+        self.save_face_indexing_results_impl(media_id, faces, embeddings)
     }
 
     fn find_media_missing_embeddings(&self) -> Result<Vec<MediaItem>, DomainError> {
@@ -661,12 +542,26 @@ impl MediaRepository for SqliteRepository {
         self.reset_face_index_impl()
     }
 
-    fn create_person(&self, id: uuid::Uuid, name: &str) -> Result<crate::domain::Person, DomainError> {
+    fn list_people(
+        &self,
+        include_hidden: bool,
+    ) -> Result<Vec<(Person, Option<Face>, Option<MediaSummary>)>, DomainError> {
+        self.list_people_impl(include_hidden)
+    }
+
+    fn get_person(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<Option<(Person, Option<Face>, Option<MediaSummary>)>, DomainError> {
+        self.get_person_impl(id)
+    }
+
+    fn create_person(&self, id: uuid::Uuid, name: &str) -> Result<Person, DomainError> {
         self.create_person_impl(id, name)
     }
 
-    fn list_people(&self) -> Result<Vec<crate::domain::Person>, DomainError> {
-        self.list_people_impl()
+    fn update_person(&self, person: &Person) -> Result<(), DomainError> {
+        self.update_person_impl(person)
     }
 
     fn delete_person(&self, id: uuid::Uuid) -> Result<(), DomainError> {
@@ -677,20 +572,39 @@ impl MediaRepository for SqliteRepository {
         self.rename_person_impl(id, name)
     }
 
-    fn name_face(&self, face_id: uuid::Uuid, person_id: Option<uuid::Uuid>) -> Result<(), DomainError> {
-        self.name_face_impl(face_id, person_id)
+    fn name_face(&self, face_id: uuid::Uuid, person_id: uuid::Uuid) -> Result<(), DomainError> {
+        self.name_face_impl(face_id, Some(person_id))
     }
 
-    fn name_cluster(&self, cluster_id: i64, person_id: Option<uuid::Uuid>) -> Result<(), DomainError> {
-        self.name_cluster_impl(cluster_id, person_id)
+    fn name_cluster(&self, cluster_id: i64, person_id: uuid::Uuid) -> Result<(), DomainError> {
+        self.name_cluster_impl(cluster_id, Some(person_id))
+    }
+
+    fn merge_people(
+        &self,
+        source_id: uuid::Uuid,
+        target_id: uuid::Uuid,
+    ) -> Result<(), DomainError> {
+        self.merge_people_impl(source_id, target_id)
+    }
+
+    fn assign_people_to_clusters(&self) -> Result<usize, DomainError> {
+        self.assign_people_to_clusters_impl()
+    }
+
+    fn get_person_photos(&self, person_id: uuid::Uuid) -> Result<Vec<MediaSummary>, DomainError> {
+        self.get_person_photos_impl(person_id)
+    }
+
+    fn get_face_stats(&self) -> Result<FaceStats, DomainError> {
+        self.get_face_stats_impl()
+    }
+
+    fn get_unscanned_media_ids(&self, limit: usize) -> Result<Vec<uuid::Uuid>, DomainError> {
+        self.get_unscanned_media_ids_impl(limit)
     }
 }
 
-// ---- Tag helpers shared across submodules ----
-
-pub(crate) use faces::{load_faces_bulk, load_faces_for_media};
-
-/// Load tags for a single media item (by UUID bytes).
 pub(crate) fn load_tags_for_media(conn: &Connection, media_id: &[u8]) -> Vec<TagDetail> {
     let mut stmt = match conn.prepare(
         "SELECT t.name, mt.is_auto, mt.confidence 
@@ -715,13 +629,11 @@ pub(crate) fn load_tags_for_media(conn: &Connection, media_id: &[u8]) -> Vec<Tag
     rows.filter_map(|r| r.ok()).collect()
 }
 
-/// Load tags for multiple media items at once. Returns a map of UUID bytes -> tag list.
 pub(crate) fn load_tags_bulk(
     conn: &Connection,
     media_ids: &[Vec<u8>],
 ) -> std::collections::HashMap<Vec<u8>, Vec<TagDetail>> {
-    let mut map: std::collections::HashMap<Vec<u8>, Vec<TagDetail>> =
-        std::collections::HashMap::new();
+    let mut map = std::collections::HashMap::new();
     if media_ids.is_empty() {
         return map;
     }
@@ -744,8 +656,6 @@ pub(crate) fn normalize_vector(vector: &mut [f32]) {
     }
 }
 
-/// RAII guard for test databases. Creates the DB in the system temp directory
-/// and deletes it when dropped (even if the test panics).
 #[cfg(test)]
 pub(crate) struct TestDb {
     pub path: String,

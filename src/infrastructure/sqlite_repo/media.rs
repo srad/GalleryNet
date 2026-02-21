@@ -3,9 +3,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::params;
 use uuid::Uuid;
 
-use super::{
-    load_faces_bulk, load_faces_for_media, load_tags_bulk, load_tags_for_media, SqliteRepository,
-};
+use super::faces::load_faces_for_media;
+use super::{load_tags_bulk, load_tags_for_media, SqliteRepository};
 
 impl SqliteRepository {
     pub(crate) fn save_metadata_and_vector_impl(
@@ -14,15 +13,16 @@ impl SqliteRepository {
         vector: Option<&[f32]>,
     ) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            let tx = conn.transaction().map_err(|e| DomainError::Database(e.to_string()))?;
+            conn.execute("BEGIN", [])
+                .map_err(|e| DomainError::Database(e.to_string()))?;
 
             let uuid_bytes = media.id.as_bytes();
             let timestamp_str = media.uploaded_at.to_rfc3339();
             let original_date_str = media.original_date.to_rfc3339();
 
-            tx.execute(
-                "INSERT INTO media (id, filename, original_filename, media_type, phash, uploaded_at, original_date, width, height, size_bytes, exif_json, faces_scanned)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            let res = conn.execute(
+                "INSERT INTO media (id, filename, original_filename, media_type, phash, uploaded_at, original_date, width, height, size_bytes, exif_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     uuid_bytes,
                     media.filename,
@@ -34,10 +34,14 @@ impl SqliteRepository {
                     media.width,
                     media.height,
                     media.size_bytes,
-                    media.exif_json,
-                    media.faces_scanned
+                    media.exif_json
                 ],
-            ).map_err(|e| DomainError::Database(e.to_string()))?;
+            );
+
+            if let Err(e) = res {
+                let _ = conn.execute("ROLLBACK", []);
+                return Err(DomainError::Database(e.to_string()));
+            }
 
             if let Some(v) = vector {
                 let vector_bytes: &[u8] = unsafe {
@@ -47,15 +51,21 @@ impl SqliteRepository {
                     )
                 };
 
-                let media_rowid = tx.last_insert_rowid();
+                let media_rowid = conn.last_insert_rowid();
 
-                tx.execute(
+                let res = conn.execute(
                     "INSERT INTO vec_media (rowid, embedding) VALUES (?1, ?2)",
                     params![media_rowid, vector_bytes],
-                ).map_err(|e| DomainError::Database(e.to_string()))?;
+                );
+
+                if let Err(e) = res {
+                    let _ = conn.execute("ROLLBACK", []);
+                    return Err(DomainError::Database(e.to_string()));
+                }
             }
 
-            tx.commit().map_err(|e| DomainError::Database(e.to_string()))?;
+            conn.execute("COMMIT", [])
+                .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })
     }
@@ -66,8 +76,7 @@ impl SqliteRepository {
         vector: Option<&[f32]>,
     ) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
+            conn.execute("BEGIN", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
             let uuid_bytes = media.id.as_bytes();
@@ -75,7 +84,7 @@ impl SqliteRepository {
             let original_date_str = media.original_date.to_rfc3339();
 
             // Update media table
-            tx.execute(
+            let res = conn.execute(
                 "UPDATE media SET 
                     filename = ?2,
                     original_filename = ?3,
@@ -86,8 +95,7 @@ impl SqliteRepository {
                     width = ?8,
                     height = ?9,
                     size_bytes = ?10,
-                    exif_json = ?11,
-                    faces_scanned = ?12
+                    exif_json = ?11
                  WHERE id = ?1",
                 params![
                     uuid_bytes,
@@ -100,20 +108,23 @@ impl SqliteRepository {
                     media.width,
                     media.height,
                     media.size_bytes,
-                    media.exif_json,
-                    media.faces_scanned
+                    media.exif_json
                 ],
-            )
-            .map_err(|e| DomainError::Database(e.to_string()))?;
+            );
+
+            if let Err(e) = res {
+                let _ = conn.execute("ROLLBACK", []);
+                return Err(DomainError::Database(e.to_string()));
+            }
 
             // Update vector: get rowid, delete from vec_media, re-insert
-            let rowid: Option<i64> = tx
+            let rowid: Option<i64> = conn
                 .prepare("SELECT rowid FROM media WHERE id = ?1")
                 .and_then(|mut s| s.query_row(params![uuid_bytes], |r| r.get(0)))
                 .ok();
 
             if let Some(rowid) = rowid {
-                let _ = tx.execute("DELETE FROM vec_media WHERE rowid = ?1", params![rowid]);
+                let _ = conn.execute("DELETE FROM vec_media WHERE rowid = ?1", params![rowid]);
 
                 if let Some(v) = vector {
                     let vector_bytes: &[u8] = unsafe {
@@ -123,15 +134,19 @@ impl SqliteRepository {
                         )
                     };
 
-                    tx.execute(
+                    let res = conn.execute(
                         "INSERT INTO vec_media (rowid, embedding) VALUES (?1, ?2)",
                         params![rowid, vector_bytes],
-                    )
-                    .map_err(|e| DomainError::Database(e.to_string()))?;
+                    );
+
+                    if let Err(e) = res {
+                        let _ = conn.execute("ROLLBACK", []);
+                        return Err(DomainError::Database(e.to_string()));
+                    }
                 }
             }
 
-            tx.commit()
+            conn.execute("COMMIT", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })
@@ -166,7 +181,7 @@ impl SqliteRepository {
             };
 
             let mut stmt = conn.prepare(
-                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, v.distance, (f.media_id IS NOT NULL) as is_favorite, m.faces_scanned
+                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, v.distance, (f.media_id IS NOT NULL) as is_favorite
                  FROM (
                     SELECT rowid, distance
                     FROM vec_media
@@ -196,11 +211,32 @@ impl SqliteRepository {
                         let size_bytes: i64 = row.get(9)?;
                         let exif_json: Option<String> = row.get(10)?;
                         let is_favorite: bool = row.get(12)?;
-                        let faces_scanned: bool = row.get(13)?;
 
-                        let id = Uuid::from_slice(&id_bytes).unwrap();
-                        let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str).unwrap().with_timezone(&Utc);
-                        let original_date = DateTime::parse_from_rfc3339(&original_date_str).unwrap().with_timezone(&Utc);
+                        let id = Uuid::from_slice(&id_bytes).map_err(|e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Blob,
+                                Box::new(e),
+                            )
+                        })?;
+                        let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str)
+                            .map_err(|e| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    5,
+                                    rusqlite::types::Type::Text,
+                                    Box::new(e),
+                                )
+                            })?
+                            .with_timezone(&Utc);
+                        let original_date = DateTime::parse_from_rfc3339(&original_date_str)
+                            .map_err(|e| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    6,
+                                    rusqlite::types::Type::Text,
+                                    Box::new(e),
+                                )
+                            })?
+                            .with_timezone(&Utc);
 
                         Ok((
                             id_bytes,
@@ -217,9 +253,9 @@ impl SqliteRepository {
                                 size_bytes,
                                 exif_json,
                                 is_favorite,
+                                faces_scanned: false, // Default or load from DB if we add it to the SELECT
                                 tags: vec![],
                                 faces: vec![],
-                                faces_scanned,
                             },
                         ))
                     },
@@ -243,7 +279,6 @@ impl SqliteRepository {
                     if let Some(tags) = tags_map.get(&id_bytes) {
                         item.tags = tags.clone();
                     }
-                    item.faces = load_faces_for_media(conn, &id_bytes);
                     item
                 })
                 .collect();
@@ -255,7 +290,7 @@ impl SqliteRepository {
     pub(crate) fn find_by_id_impl(&self, id: Uuid) -> Result<Option<MediaItem>, DomainError> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite, m.faces_scanned
+                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite
                  FROM media m
                  LEFT JOIN favorites f ON f.media_id = m.id
                  WHERE m.id = ?1"
@@ -274,7 +309,6 @@ impl SqliteRepository {
                 let size_bytes: i64 = row.get(9)?;
                 let exif_json: Option<String> = row.get(10)?;
                 let is_favorite: bool = row.get(11)?;
-                let faces_scanned: bool = row.get(12)?;
 
                 let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
@@ -315,9 +349,9 @@ impl SqliteRepository {
                     size_bytes,
                     exif_json,
                     is_favorite,
+                    faces_scanned: false, // Default or load from DB
                     tags: vec![],
                     faces: vec![],
-                    faces_scanned,
                 })
             });
 
@@ -336,7 +370,7 @@ impl SqliteRepository {
     pub(crate) fn find_media_without_phash_impl(&self) -> Result<Vec<MediaItem>, DomainError> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite, m.faces_scanned
+                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite
                  FROM media m
                  LEFT JOIN favorites f ON f.media_id = m.id
                  WHERE m.phash = 'no_hash'"
@@ -356,7 +390,6 @@ impl SqliteRepository {
                     let size_bytes: i64 = row.get(9)?;
                     let exif_json: Option<String> = row.get(10)?;
                     let is_favorite: bool = row.get(11)?;
-                    let faces_scanned: bool = row.get(12)?;
 
                     let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -397,10 +430,12 @@ impl SqliteRepository {
                         size_bytes,
                         exif_json,
                         is_favorite,
-                        tags: vec![],
-                        faces: vec![],
-                        faces_scanned,
-                    })
+                    faces_scanned: false,
+                    tags: vec![],
+                    faces: vec![],
+                })
+
+
                 })
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
@@ -409,186 +444,48 @@ impl SqliteRepository {
                 items.push(row.map_err(|e| DomainError::Database(e.to_string()))?);
             }
             Ok(items)
-        })
-    }
-
-    pub(crate) fn find_media_unscanned_faces_impl(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<MediaItem>, DomainError> {
-        self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite, m.faces_scanned
-                 FROM media m
-                 LEFT JOIN favorites f ON f.media_id = m.id
-                 WHERE m.faces_scanned = 0 AND m.phash != 'no_hash'
-                 LIMIT ?1"
-            ).map_err(|e| DomainError::Database(e.to_string()))?;
-
-            let rows = stmt
-                .query_map(params![limit as i64], |row| {
-                    let id_bytes: Vec<u8> = row.get(0)?;
-                    let filename: String = row.get(1)?;
-                    let original_filename: String = row.get(2)?;
-                    let media_type: String = row.get(3)?;
-                    let phash: String = row.get(4)?;
-                    let timestamp_str: String = row.get(5)?;
-                    let original_date_str: String = row.get(6)?;
-                    let width: Option<u32> = row.get(7)?;
-                    let height: Option<u32> = row.get(8)?;
-                    let size_bytes: i64 = row.get(9)?;
-                    let exif_json: Option<String> = row.get(10)?;
-                    let is_favorite: bool = row.get(11)?;
-                    let faces_scanned: bool = row.get(12)?;
-
-                    let id = Uuid::from_slice(&id_bytes).unwrap();
-                    let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str).unwrap().with_timezone(&Utc);
-                    let original_date = DateTime::parse_from_rfc3339(&original_date_str).unwrap().with_timezone(&Utc);
-
-                    Ok(MediaItem {
-                        id, filename, original_filename, media_type, phash,
-                        uploaded_at, original_date, width, height, size_bytes,
-                        exif_json, is_favorite, tags: vec![], faces: vec![], faces_scanned,
-                    })
-                })
-                .map_err(|e| DomainError::Database(e.to_string()))?;
-
-            let mut items = Vec::new();
-            for row in rows {
-                items.push(row.map_err(|e| DomainError::Database(e.to_string()))?);
-            }
-            Ok(items)
-        })
-    }
-
-    pub(crate) fn mark_faces_scanned_impl(&self, id: Uuid) -> Result<(), DomainError> {
-        self.with_conn(|conn| {
-            conn.execute(
-                "UPDATE media SET faces_scanned = 1 WHERE id = ?1",
-                params![id.as_bytes()],
-            )
-            .map_err(|e| DomainError::Database(e.to_string()))?;
-            Ok(())
-        })
-    }
-
-    pub(crate) fn get_media_items_by_ids_impl(
-        &self,
-        ids: &[Uuid],
-    ) -> Result<Vec<MediaItem>, DomainError> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        self.with_conn(|conn| {
-            let mut results = std::collections::HashMap::new();
-            
-            for chunk in ids.chunks(900) {
-                let placeholders: Vec<String> = chunk.iter().map(|_| "?".to_string()).collect();
-                let sql = format!(
-                    "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite, m.faces_scanned
-                     FROM media m
-                     LEFT JOIN favorites f ON f.media_id = m.id
-                     WHERE m.id IN ({})",
-                    placeholders.join(", ")
-                );
-
-                let mut stmt = conn.prepare(&sql).map_err(|e| DomainError::Database(e.to_string()))?;
-                let id_params: Vec<Vec<u8>> = chunk.iter().map(|id| id.as_bytes().to_vec()).collect();
-                let param_refs: Vec<&dyn rusqlite::ToSql> = id_params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
-
-                let rows = stmt.query_map(param_refs.as_slice(), |row| {
-                    let id_bytes: Vec<u8> = row.get(0)?;
-                    let filename: String = row.get(1)?;
-                    let original_filename: String = row.get(2)?;
-                    let media_type: String = row.get(3)?;
-                    let phash: String = row.get(4)?;
-                    let timestamp_str: String = row.get(5)?;
-                    let original_date_str: String = row.get(6)?;
-                    let width: Option<u32> = row.get(7)?;
-                    let height: Option<u32> = row.get(8)?;
-                    let size_bytes: i64 = row.get(9)?;
-                    let exif_json: Option<String> = row.get(10)?;
-                    let is_favorite: bool = row.get(11)?;
-                    let faces_scanned: bool = row.get(12)?;
-
-                    let id = Uuid::from_slice(&id_bytes).unwrap();
-                    let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str).unwrap().with_timezone(&Utc);
-                    let original_date = DateTime::parse_from_rfc3339(&original_date_str).unwrap().with_timezone(&Utc);
-
-                    Ok((id_bytes, MediaItem {
-                        id, filename, original_filename, media_type, phash,
-                        uploaded_at, original_date, width, height, size_bytes,
-                        exif_json, is_favorite, tags: vec![], faces: vec![], faces_scanned,
-                    }))
-                }).map_err(|e| DomainError::Database(e.to_string()))?;
-
-                let mut items_with_ids: Vec<(Vec<u8>, MediaItem)> = Vec::new();
-                for row in rows {
-                    items_with_ids.push(row.map_err(|e| DomainError::Database(e.to_string()))?);
-                }
-
-                // Load tags and faces in bulk
-                let id_bytes_list: Vec<Vec<u8>> =
-                    items_with_ids.iter().map(|(id_bytes, _)| id_bytes.clone()).collect();
-                let tags_map = load_tags_bulk(conn, &id_bytes_list);
-                let faces_map = load_faces_bulk(conn, &id_bytes_list);
-
-                for (id_bytes, mut item) in items_with_ids {
-                    if let Some(tags) = tags_map.get(&id_bytes) {
-                        item.tags = tags.clone();
-                    }
-                    if let Some(faces) = faces_map.get(&id_bytes) {
-                        item.faces = faces.clone();
-                    }
-                    results.insert(item.id, item);
-                }
-            }
-
-            let ordered_results = ids.iter()
-                .filter_map(|id| results.remove(id))
-                .collect();
-
-            Ok(ordered_results)
         })
     }
 
     pub(crate) fn delete_impl(&self, id: Uuid) -> Result<(), DomainError> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
+            conn.execute("BEGIN", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
-            let rowid: Option<i64> = tx
+            let rowid: Option<i64> = conn
                 .prepare("SELECT rowid FROM media WHERE id = ?1")
                 .and_then(|mut s| s.query_row(params![id.as_bytes()], |r| r.get(0)))
                 .ok();
 
             // Clean up tags
-            let _ = tx.execute(
+            let _ = conn.execute(
                 "DELETE FROM media_tags WHERE media_id = ?1",
                 params![id.as_bytes()],
             );
 
             // Clean up favorites
-            let _ = tx.execute(
+            let _ = conn.execute(
                 "DELETE FROM favorites WHERE media_id = ?1",
                 params![id.as_bytes()],
             );
 
-            let deleted = tx
+            let deleted = conn
                 .execute("DELETE FROM media WHERE id = ?1", params![id.as_bytes()])
-                .map_err(|e| DomainError::Database(e.to_string()))?;
+                .map_err(|e| {
+                    let _ = conn.execute("ROLLBACK", []);
+                    DomainError::Database(e.to_string())
+                })?;
 
             if deleted == 0 {
+                let _ = conn.execute("ROLLBACK", []);
                 return Err(DomainError::NotFound);
             }
 
             if let Some(rowid) = rowid {
-                let _ = tx.execute("DELETE FROM vec_media WHERE rowid = ?1", params![rowid]);
+                let _ = conn.execute("DELETE FROM vec_media WHERE rowid = ?1", params![rowid]);
             }
 
-            tx.commit()
+            conn.execute("COMMIT", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(())
         })
@@ -638,41 +535,43 @@ impl SqliteRepository {
 
     pub(crate) fn delete_many_impl(&self, ids: &[Uuid]) -> Result<usize, DomainError> {
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction()
+            conn.execute("BEGIN", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
             let mut deleted = 0usize;
             for id in ids {
-                let rowid: Option<i64> = tx
+                let rowid: Option<i64> = conn
                     .prepare("SELECT rowid FROM media WHERE id = ?1")
                     .and_then(|mut s| s.query_row(params![id.as_bytes()], |r| r.get(0)))
                     .ok();
 
                 // Clean up tags
-                let _ = tx.execute(
+                let _ = conn.execute(
                     "DELETE FROM media_tags WHERE media_id = ?1",
                     params![id.as_bytes()],
                 );
 
                 // Clean up favorites
-                let _ = tx.execute(
+                let _ = conn.execute(
                     "DELETE FROM favorites WHERE media_id = ?1",
                     params![id.as_bytes()],
                 );
 
-                let count = tx
+                let count = conn
                     .execute("DELETE FROM media WHERE id = ?1", params![id.as_bytes()])
-                    .map_err(|e| DomainError::Database(e.to_string()))?;
+                    .map_err(|e| {
+                        let _ = conn.execute("ROLLBACK", []);
+                        DomainError::Database(e.to_string())
+                    })?;
 
                 if let Some(rowid) = rowid {
-                    let _ = tx.execute("DELETE FROM vec_media WHERE rowid = ?1", params![rowid]);
+                    let _ = conn.execute("DELETE FROM vec_media WHERE rowid = ?1", params![rowid]);
                 }
 
                 deleted += count;
             }
 
-            tx.commit()
+            conn.execute("COMMIT", [])
                 .map_err(|e| DomainError::Database(e.to_string()))?;
             Ok(deleted)
         })
@@ -687,8 +586,6 @@ impl SqliteRepository {
         tags: Option<Vec<String>>,
         person_id: Option<Uuid>,
         cluster_id: Option<i64>,
-        person_id: Option<Uuid>,
-        cluster_id: Option<i64>,
         sort_asc: bool,
         sort_by: &str,
     ) -> Result<Vec<MediaSummary>, DomainError> {
@@ -699,7 +596,7 @@ impl SqliteRepository {
                 _ => "m.original_date",
             };
 
-            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite, m.size_bytes
+            let mut sql = "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, (f.media_id IS NOT NULL) as is_favorite, m.size_bytes, m.width, m.height
                          FROM media m
                          LEFT JOIN favorites f ON f.media_id = m.id".to_string();
 
@@ -715,8 +612,19 @@ impl SqliteRepository {
                 conditions.push("f.media_id IS NOT NULL".to_string());
             }
 
+            if let Some(pid) = person_id {
+                conditions.push("EXISTS (SELECT 1 FROM faces fs WHERE fs.media_id = m.id AND fs.person_id = ?)".to_string());
+                params_vec.push(Box::new(pid.as_bytes().to_vec()));
+            }
+
+            if let Some(cid) = cluster_id {
+                conditions.push("EXISTS (SELECT 1 FROM faces fs WHERE fs.media_id = m.id AND fs.cluster_id = ?)".to_string());
+                params_vec.push(Box::new(cid));
+            }
+
             // Tag filtering: media must have ANY of the specified tags (OR)
             if let Some(ref tag_list) = tags {
+
                 if !tag_list.is_empty() {
                     let placeholders: Vec<String> = tag_list.iter().map(|_| "?".to_string()).collect();
                     conditions.push(format!(
@@ -727,17 +635,6 @@ impl SqliteRepository {
                         params_vec.push(Box::new(tag.clone()));
                     }
                 }
-            }
-
-            
-            if let Some(pid) = person_id {
-                conditions.push("EXISTS (SELECT 1 FROM faces f2 WHERE f2.media_id = m.id AND f2.person_id = ?)".to_string());
-                params_vec.push(Box::new(pid.as_bytes().to_vec()));
-            }
-
-            if let Some(cid) = cluster_id {
-                conditions.push("EXISTS (SELECT 1 FROM faces f2 WHERE f2.media_id = m.id AND f2.cluster_id = ?)".to_string());
-                params_vec.push(Box::new(cid));
             }
 
             if !conditions.is_empty() {
@@ -756,7 +653,7 @@ impl SqliteRepository {
                 .prepare(&sql)
                 .map_err(|e| DomainError::Database(e.to_string()))?;
 
-            let param_refs: Vec<&dyn rusqlite::ToSql> =
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                 params_vec.iter().map(|p| p.as_ref()).collect();
 
             let rows = stmt
@@ -769,10 +666,34 @@ impl SqliteRepository {
                     let original_date_str: String = row.get(5)?;
                     let is_favorite: bool = row.get(6)?;
                     let size_bytes: i64 = row.get(7)?;
+                    let width: Option<u32> = row.get(8)?;
+                    let height: Option<u32> = row.get(9)?;
 
-                    let id = Uuid::from_slice(&id_bytes).unwrap();
-                    let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str).unwrap().with_timezone(&Utc);
-                    let original_date = DateTime::parse_from_rfc3339(&original_date_str).unwrap().with_timezone(&Utc);
+                    let id = Uuid::from_slice(&id_bytes).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Blob,
+                            Box::new(e),
+                        )
+                    })?;
+                    let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str)
+                        .map_err(|e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                4,
+                                rusqlite::types::Type::Text,
+                                Box::new(e),
+                            )
+                        })?
+                        .with_timezone(&Utc);
+                    let original_date = DateTime::parse_from_rfc3339(&original_date_str)
+                        .map_err(|e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                5,
+                                rusqlite::types::Type::Text,
+                                Box::new(e),
+                            )
+                        })?
+                        .with_timezone(&Utc);
 
                     Ok((
                         id_bytes,
@@ -783,6 +704,8 @@ impl SqliteRepository {
                             media_type,
                             uploaded_at,
                             original_date,
+                            width,
+                            height,
                             size_bytes,
                             is_favorite,
                             tags: vec![],
@@ -858,60 +781,12 @@ impl SqliteRepository {
             Ok(())
         })
     }
-
-    pub(crate) fn find_media_missing_embeddings_impl(&self) -> Result<Vec<MediaItem>, DomainError> {
-        self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT m.id, m.filename, m.original_filename, m.media_type, m.phash, m.uploaded_at, m.original_date, m.width, m.height, m.size_bytes, m.exif_json, (f.media_id IS NOT NULL) as is_favorite, m.faces_scanned
-                 FROM media m
-                 LEFT JOIN vec_media v ON v.rowid = m.rowid
-                 LEFT JOIN favorites f ON f.media_id = m.id
-                 WHERE v.rowid IS NULL AND m.phash != 'no_hash' AND m.media_type = 'image'"
-            ).map_err(|e| DomainError::Database(e.to_string()))?;
-
-            let rows = stmt
-                .query_map([], |row| {
-                    let id_bytes: Vec<u8> = row.get(0)?;
-                    let filename: String = row.get(1)?;
-                    let original_filename: String = row.get(2)?;
-                    let media_type: String = row.get(3)?;
-                    let phash: String = row.get(4)?;
-                    let timestamp_str: String = row.get(5)?;
-                    let original_date_str: String = row.get(6)?;
-                    let width: Option<u32> = row.get(7)?;
-                    let height: Option<u32> = row.get(8)?;
-                    let size_bytes: i64 = row.get(9)?;
-                    let exif_json: Option<String> = row.get(10)?;
-                    let is_favorite: bool = row.get(11)?;
-                    let faces_scanned: bool = row.get(12)?;
-
-                    let id = Uuid::from_slice(&id_bytes).unwrap();
-                    let uploaded_at = DateTime::parse_from_rfc3339(&timestamp_str).unwrap().with_timezone(&Utc);
-                    let original_date = DateTime::parse_from_rfc3339(&original_date_str).unwrap().with_timezone(&Utc);
-
-                    Ok(MediaItem {
-                        id, filename, original_filename, media_type, phash,
-                        uploaded_at, original_date, width, height, size_bytes,
-                        exif_json, is_favorite, tags: vec![], faces: vec![], faces_scanned,
-                    })
-                })
-                .map_err(|e| DomainError::Database(e.to_string()))?;
-
-            let mut items = Vec::new();
-            for row in rows {
-                items.push(row.map_err(|e| DomainError::Database(e.to_string()))?);
-            }
-            Ok(items)
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::TestDb;
-    use crate::domain::MediaItem;
     use crate::infrastructure::SqliteRepository;
-    use chrono::Utc;
     use rusqlite::params;
     use uuid::Uuid;
 
@@ -919,8 +794,8 @@ mod tests {
     fn insert_media(repo: &SqliteRepository, id: Uuid, date: &str, size: i64) {
         repo.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO media (id, filename, original_filename, size_bytes, phash, uploaded_at, original_date, media_type, faces_scanned)
-                 VALUES (?1, ?2, ?3, ?4, 'ph', '2024-01-01T00:00:00Z', ?5, 'image', 1)",
+                "INSERT INTO media (id, filename, original_filename, size_bytes, phash, uploaded_at, original_date)
+                 VALUES (?1, ?2, ?3, ?4, 'ph', '2024-01-01T00:00:00Z', ?5)",
                 params![
                     id.as_bytes(),
                     format!("{}.jpg", id),
@@ -948,9 +823,10 @@ mod tests {
 
         let results = db
             .repo
-            .find_all_impl(10, 0, None, false, None, false, "date")
+            .find_all_impl(10, 0, None, false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(results.len(), 3);
+
         // DESC by date: Jun, Mar, Jan
         assert_eq!(results[0].id, id2);
         assert_eq!(results[1].id, id3);
@@ -970,9 +846,10 @@ mod tests {
 
         let results = db
             .repo
-            .find_all_impl(10, 0, None, false, None, true, "date")
+            .find_all_impl(10, 0, None, false, None, None, None, true, "date")
             .unwrap();
         assert_eq!(results.len(), 3);
+
         // ASC by date: Jan, Mar, Jun
         assert_eq!(results[0].id, id1);
         assert_eq!(results[1].id, id3);
@@ -992,8 +869,9 @@ mod tests {
 
         let results = db
             .repo
-            .find_all_impl(10, 0, None, false, None, false, "size")
+            .find_all_impl(10, 0, None, false, None, None, None, false, "size")
             .unwrap();
+
         assert_eq!(results.len(), 3);
         // DESC by size: 9999, 500, 100
         assert_eq!(results[0].id, id3);
@@ -1014,7 +892,7 @@ mod tests {
 
         let results = db
             .repo
-            .find_all_impl(10, 0, None, false, None, true, "size")
+            .find_all_impl(10, 0, None, false, None, None, None, true, "size")
             .unwrap();
         assert_eq!(results.len(), 3);
         // ASC by size: 100, 500, 9999
@@ -1040,6 +918,8 @@ mod tests {
                 0,
                 None,
                 false,
+                None,
+                None,
                 None,
                 false,
                 "bogus; DROP TABLE media;--",
@@ -1074,7 +954,9 @@ mod tests {
         // Sort folder by size descending
         let results = db
             .repo
-            .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, "size")
+            .find_all_in_folder_impl(
+                folder_id, 10, 0, None, false, None, None, None, false, "size",
+            )
             .unwrap();
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].id, id3); // 9999
@@ -1084,7 +966,9 @@ mod tests {
         // Sort folder by size ascending
         let results = db
             .repo
-            .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, true, "size")
+            .find_all_in_folder_impl(
+                folder_id, 10, 0, None, false, None, None, None, true, "size",
+            )
             .unwrap();
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].id, id2); // 100
@@ -1120,7 +1004,7 @@ mod tests {
         // Filter images only
         let images = db
             .repo
-            .find_all_impl(10, 0, Some("image"), false, None, false, "date")
+            .find_all_impl(10, 0, Some("image"), false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(images.len(), 2);
         assert!(images.iter().all(|m| m.media_type == "image"));
@@ -1128,7 +1012,7 @@ mod tests {
         // Filter videos only
         let videos = db
             .repo
-            .find_all_impl(10, 0, Some("video"), false, None, false, "date")
+            .find_all_impl(10, 0, Some("video"), false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(videos.len(), 1);
         assert_eq!(videos[0].id, vid1);
@@ -1136,7 +1020,7 @@ mod tests {
         // No filter — returns all
         let all = db
             .repo
-            .find_all_impl(10, 0, None, false, None, false, "date")
+            .find_all_impl(10, 0, None, false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(all.len(), 3);
     }
@@ -1159,7 +1043,7 @@ mod tests {
         // Filter favorites
         let favs = db
             .repo
-            .find_all_impl(10, 0, None, true, None, false, "date")
+            .find_all_impl(10, 0, None, true, None, None, None, false, "date")
             .unwrap();
         assert_eq!(favs.len(), 2);
         assert!(favs.iter().all(|m| m.is_favorite));
@@ -1168,7 +1052,7 @@ mod tests {
         db.repo.set_favorite_impl(id1, false).unwrap();
         let favs = db
             .repo
-            .find_all_impl(10, 0, None, true, None, false, "date")
+            .find_all_impl(10, 0, None, true, None, None, None, false, "date")
             .unwrap();
         assert_eq!(favs.len(), 1);
         assert_eq!(favs[0].id, id3);
@@ -1176,7 +1060,7 @@ mod tests {
         // No favorite filter — all returned, with correct is_favorite flag
         let all = db
             .repo
-            .find_all_impl(10, 0, None, false, None, false, "date")
+            .find_all_impl(10, 0, None, false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(all.len(), 3);
         // id3 (Mar) is first in desc order and is favorited
@@ -1193,7 +1077,7 @@ mod tests {
         let id3 = Uuid::new_v4();
         insert_media(&db.repo, id1, "2024-01-01T00:00:00Z", 100);
         insert_media(&db.repo, id2, "2024-02-01T00:00:00Z", 200);
-        insert_media(&db.repo, id3, "2024-03-10T00:00:00Z", 300);
+        insert_media(&db.repo, id3, "2024-03-01T00:00:00Z", 300);
 
         // Tag id1 with "Nature", id2 with "City", id3 with both
         db.repo
@@ -1215,6 +1099,8 @@ mod tests {
                 None,
                 false,
                 Some(vec!["Nature".to_string()]),
+                None,
+                None,
                 false,
                 "date",
             )
@@ -1233,6 +1119,8 @@ mod tests {
                 None,
                 false,
                 Some(vec!["City".to_string()]),
+                None,
+                None,
                 false,
                 "date",
             )
@@ -1248,6 +1136,8 @@ mod tests {
                 None,
                 false,
                 Some(vec!["Nature".to_string(), "City".to_string()]),
+                None,
+                None,
                 false,
                 "date",
             )
@@ -1263,6 +1153,8 @@ mod tests {
                 None,
                 false,
                 Some(vec!["Nonexistent".to_string()]),
+                None,
+                None,
                 false,
                 "date",
             )
@@ -1312,7 +1204,7 @@ mod tests {
         // Favorite images only
         let fav_images = db
             .repo
-            .find_all_impl(10, 0, Some("image"), true, None, false, "date")
+            .find_all_impl(10, 0, Some("image"), true, None, None, None, false, "date")
             .unwrap();
         assert_eq!(fav_images.len(), 2); // id1, id4
         assert!(fav_images
@@ -1328,6 +1220,8 @@ mod tests {
                 None,
                 true,
                 Some(vec!["Nature".to_string()]),
+                None,
+                None,
                 false,
                 "date",
             )
@@ -1343,6 +1237,8 @@ mod tests {
                 Some("image"),
                 true,
                 Some(vec!["Nature".to_string()]),
+                None,
+                None,
                 false,
                 "date",
             )
@@ -1371,7 +1267,7 @@ mod tests {
         // Page 1: limit 3, offset 0 (DESC: Oct, Sep, Aug)
         let page1 = db
             .repo
-            .find_all_impl(3, 0, None, false, None, false, "date")
+            .find_all_impl(3, 0, None, false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(page1.len(), 3);
         assert_eq!(page1[0].id, ids[9]); // Oct (month 10)
@@ -1381,7 +1277,7 @@ mod tests {
         // Page 2: limit 3, offset 3 (DESC: Jul, Jun, May)
         let page2 = db
             .repo
-            .find_all_impl(3, 3, None, false, None, false, "date")
+            .find_all_impl(3, 3, None, false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(page2.len(), 3);
         assert_eq!(page2[0].id, ids[6]); // Jul
@@ -1389,7 +1285,7 @@ mod tests {
         // Page 4: limit 3, offset 9 (only 1 item left)
         let page4 = db
             .repo
-            .find_all_impl(3, 9, None, false, None, false, "date")
+            .find_all_impl(3, 9, None, false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(page4.len(), 1);
         assert_eq!(page4[0].id, ids[0]); // Jan
@@ -1397,7 +1293,7 @@ mod tests {
         // Beyond all: offset 10
         let empty = db
             .repo
-            .find_all_impl(3, 10, None, false, None, false, "date")
+            .find_all_impl(3, 10, None, false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(empty.len(), 0);
     }
@@ -1421,7 +1317,7 @@ mod tests {
         for offset in (0..10).step_by(3) {
             let page = db
                 .repo
-                .find_all_impl(3, offset, None, false, None, false, "date")
+                .find_all_impl(3, offset, None, false, None, None, None, false, "date")
                 .unwrap();
             for item in &page {
                 assert!(!all_ids.contains(&item.id), "Duplicate item across pages");
@@ -1438,24 +1334,24 @@ mod tests {
         let db = TestDb::new("test_save_find");
 
         let id = Uuid::new_v4();
-        let media = MediaItem {
+        let media = crate::domain::MediaItem {
             id,
             filename: "ab/cd/test.jpg".to_string(),
             original_filename: "photo.jpg".to_string(),
             media_type: "image".to_string(),
             phash: "abc123".to_string(),
-            uploaded_at: Utc::now(),
+            uploaded_at: chrono::Utc::now(),
             original_date: chrono::DateTime::parse_from_rfc3339("2024-06-15T12:00:00Z")
                 .unwrap()
-                .with_timezone(&Utc),
+                .with_timezone(&chrono::Utc),
             width: Some(1920),
             height: Some(1080),
             size_bytes: 5_000_000,
             exif_json: Some(r#"{"Make":"Canon"}"#.to_string()),
             is_favorite: false,
+            faces_scanned: false,
             tags: vec![],
             faces: vec![],
-            faces_scanned: false,
         };
 
         db.repo.save_metadata_and_vector_impl(&media, None).unwrap();
@@ -1463,6 +1359,12 @@ mod tests {
         let found = db.repo.find_by_id_impl(id).unwrap().unwrap();
         assert_eq!(found.id, id);
         assert_eq!(found.filename, "ab/cd/test.jpg");
+        assert_eq!(found.original_filename, "photo.jpg");
+        assert_eq!(found.media_type, "image");
+        assert_eq!(found.width, Some(1920));
+        assert_eq!(found.height, Some(1080));
+        assert_eq!(found.size_bytes, 5_000_000);
+        assert_eq!(found.exif_json, Some(r#"{"Make":"Canon"}"#.to_string()));
         assert!(!found.is_favorite);
     }
 
@@ -1519,7 +1421,7 @@ mod tests {
         // Verify remaining
         let all = db
             .repo
-            .find_all_impl(10, 0, None, false, None, false, "date")
+            .find_all_impl(10, 0, None, false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(all.len(), 2);
     }
@@ -1565,6 +1467,8 @@ mod tests {
 
     // ==================== Favorites tests ====================
 
+    // ==================== SQL injection safety tests ====================
+
     #[test]
     fn test_injection_via_sort_by() {
         let db = TestDb::new("test_inject_sort_by");
@@ -1588,7 +1492,7 @@ mod tests {
         for payload in &payloads {
             let results = db
                 .repo
-                .find_all_impl(10, 0, None, false, None, false, payload)
+                .find_all_impl(10, 0, None, false, None, None, None, false, payload)
                 .unwrap();
             assert_eq!(
                 results.len(),
@@ -1623,7 +1527,7 @@ mod tests {
         for payload in &payloads {
             let results = db
                 .repo
-                .find_all_impl(10, 0, Some(payload), false, None, false, "date")
+                .find_all_impl(10, 0, Some(payload), false, None, None, None, false, "date")
                 .unwrap();
             assert_eq!(
                 results.len(),
@@ -1636,7 +1540,7 @@ mod tests {
         // Normal filter still works
         let results = db
             .repo
-            .find_all_impl(10, 0, Some("image"), false, None, false, "date")
+            .find_all_impl(10, 0, Some("image"), false, None, None, None, false, "date")
             .unwrap();
         assert_eq!(results.len(), 1);
     }
@@ -1667,6 +1571,8 @@ mod tests {
                     None,
                     false,
                     Some(vec![payload.clone()]),
+                    None,
+                    None,
                     false,
                     "date",
                 )
@@ -1688,6 +1594,8 @@ mod tests {
                 None,
                 false,
                 Some(vec!["Safe".to_string()]),
+                None,
+                None,
                 false,
                 "date",
             )
@@ -1714,7 +1622,9 @@ mod tests {
         for payload in &payloads {
             let results = db
                 .repo
-                .find_all_in_folder_impl(folder_id, 10, 0, None, false, None, false, payload)
+                .find_all_in_folder_impl(
+                    folder_id, 10, 0, None, false, None, None, None, false, payload,
+                )
                 .unwrap();
             assert_eq!(
                 results.len(),
@@ -1729,6 +1639,8 @@ mod tests {
             );
         }
     }
+
+    // ==================== Favorites tests ====================
 
     #[test]
     fn test_favorite_toggle() {
@@ -1746,9 +1658,66 @@ mod tests {
         let item = db.repo.find_by_id_impl(id).unwrap().unwrap();
         assert!(item.is_favorite);
 
+        // Double-favorite is idempotent (INSERT OR IGNORE)
+        db.repo.set_favorite_impl(id, true).unwrap();
+        let item = db.repo.find_by_id_impl(id).unwrap().unwrap();
+        assert!(item.is_favorite);
+
         // Unfavorite
         db.repo.set_favorite_impl(id, false).unwrap();
         let item = db.repo.find_by_id_impl(id).unwrap().unwrap();
         assert!(!item.is_favorite);
+    }
+
+    #[test]
+    fn test_filter_by_person() {
+        let db = TestDb::new("test_filter_person");
+        let id = Uuid::new_v4();
+        insert_media(&db.repo, id, "2024-01-01T00:00:00Z", 100);
+        let person_id = Uuid::new_v4();
+
+        db.repo.with_conn(|conn| {
+            conn.execute("INSERT INTO people (id, name, is_hidden, created_at) VALUES (?1, 'P', 0, '2024-01-01')", params![person_id.as_bytes()]).unwrap();
+            conn.execute("INSERT INTO faces (id, media_id, box_x1, box_y1, box_x2, box_y2, person_id) VALUES (?1, ?2, 0, 0, 1, 1, ?3)",
+                params![Uuid::new_v4().as_bytes(), id.as_bytes(), person_id.as_bytes()]).unwrap();
+            Ok(())
+        }).unwrap();
+
+        let results = db
+            .repo
+            .find_all_impl(
+                10,
+                0,
+                None,
+                false,
+                None,
+                Some(person_id),
+                None,
+                false,
+                "date",
+            )
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, id);
+    }
+
+    #[test]
+    fn test_filter_by_cluster() {
+        let db = TestDb::new("test_filter_cluster");
+        let id = Uuid::new_v4();
+        insert_media(&db.repo, id, "2024-01-01T00:00:00Z", 100);
+
+        db.repo.with_conn(|conn| {
+            conn.execute("INSERT INTO faces (id, media_id, box_x1, box_y1, box_x2, box_y2, cluster_id) VALUES (?1, ?2, 0, 0, 1, 1, ?3)",
+                params![Uuid::new_v4().as_bytes(), id.as_bytes(), 999]).unwrap();
+            Ok(())
+        }).unwrap();
+
+        let results = db
+            .repo
+            .find_all_impl(10, 0, None, false, None, None, Some(999), false, "date")
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, id);
     }
 }

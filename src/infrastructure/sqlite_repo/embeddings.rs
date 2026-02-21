@@ -14,7 +14,7 @@ impl SqliteRepository {
             let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
                 match folder_id {
                     Some(fid) => (
-                        "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, v.embedding, m.size_bytes
+                        "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, v.embedding, m.size_bytes, m.width, m.height
                      FROM media m
                      JOIN folder_media fm ON fm.media_id = m.id
                      JOIN vec_media v ON v.rowid = m.rowid
@@ -25,7 +25,7 @@ impl SqliteRepository {
                         ],
                     ),
                     None => (
-                        "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, v.embedding, m.size_bytes
+                        "SELECT m.id, m.filename, m.original_filename, m.media_type, m.uploaded_at, m.original_date, v.embedding, m.size_bytes, m.width, m.height
                      FROM media m
                      JOIN vec_media v ON v.rowid = m.rowid"
                             .to_string(),
@@ -49,6 +49,8 @@ impl SqliteRepository {
                     let original_date_str: String = row.get(5)?;
                     let embedding_bytes: Vec<u8> = row.get(6)?;
                     let size_bytes: i64 = row.get(7)?;
+                    let width: Option<u32> = row.get(8)?;
+                    let height: Option<u32> = row.get(9)?;
 
                     let id = Uuid::from_slice(&id_bytes).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -83,6 +85,8 @@ impl SqliteRepository {
                         media_type,
                         uploaded_at,
                         original_date,
+                        width,
+                        height,
                         size_bytes,
                         is_favorite: false,
                         tags: vec![],
@@ -227,5 +231,45 @@ impl SqliteRepository {
             }
             Ok(results)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::TestDb;
+    use crate::domain::MediaItem;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_get_all_embeddings() {
+        let db = TestDb::new("test_get_embeddings");
+        let id = Uuid::new_v4();
+        let media = MediaItem {
+            id,
+            filename: "test.jpg".to_string(),
+            original_filename: "test.jpg".to_string(),
+            media_type: "image".to_string(),
+            phash: "phash".to_string(),
+            uploaded_at: Utc::now(),
+            original_date: Utc::now(),
+            width: Some(100),
+            height: Some(100),
+            size_bytes: 1000,
+            exif_json: None,
+            is_favorite: false,
+            faces_scanned: false,
+            tags: vec![],
+            faces: vec![],
+        };
+        let vector = vec![0.1f32; 1280];
+        db.repo
+            .save_metadata_and_vector_impl(&media, Some(&vector))
+            .unwrap();
+
+        let all = db.repo.get_all_embeddings_impl(None).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].0.id, id);
+        assert_eq!(all[0].1.len(), 1280);
     }
 }

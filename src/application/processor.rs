@@ -175,7 +175,8 @@ pub async fn process_media(
                     width = Some(img.width());
                     height = Some(img.height());
 
-                    let thumb = img.resize_to_fill(224, 224, FilterType::CatmullRom);
+                    let thumb = img.resize(224, 224, FilterType::CatmullRom);
+
                     let mut cursor = Cursor::new(&mut thumbnail_bytes);
                     let _ = thumb.write_to(&mut cursor, image::ImageFormat::Jpeg);
                 }

@@ -25,11 +25,11 @@ pub struct MediaItem {
     #[serde(default)]
     pub is_favorite: bool,
     #[serde(default)]
+    pub faces_scanned: bool,
+    #[serde(default)]
     pub tags: Vec<TagDetail>,
     #[serde(default)]
     pub faces: Vec<Face>,
-    #[serde(default)]
-    pub faces_scanned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +40,8 @@ pub struct MediaSummary {
     pub media_type: String,
     pub uploaded_at: DateTime<Utc>,
     pub original_date: DateTime<Utc>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     pub size_bytes: i64,
     #[serde(default)]
     pub is_favorite: bool,
@@ -68,8 +70,6 @@ pub struct Folder {
 pub struct MediaGroup {
     pub id: usize,
     pub items: Vec<MediaSummary>,
-    pub person_id: Option<Uuid>,
-    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,28 +85,18 @@ pub struct Face {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FaceGroup {
-    pub id: i64,
-    pub items: Vec<MediaSummary>,
-    pub person_id: Option<Uuid>,
-    pub name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Person {
     pub id: Uuid,
     pub name: String,
-    pub created_at: DateTime<Utc>,
+    pub is_hidden: bool,
+    pub face_count: i64,
+    pub representative_face_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersonSummary {
-    pub id: String,
-    pub name: Option<String>,
-    pub cluster_id: Option<i64>,
-    pub person_id: Option<Uuid>,
-    pub representative_media: MediaItem,
-    pub representative_face: Face,
+pub struct FaceGroup {
+    pub id: i64,
+    pub items: Vec<MediaSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,4 +111,14 @@ pub struct TrainedTagModel {
     pub bias: f64,
     pub platt_a: f64,
     pub platt_b: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaceStats {
+    pub total_faces: i64,
+    pub total_people: i64,
+    pub named_people: i64,
+    pub hidden_people: i64,
+    pub unassigned_faces: i64,
+    pub ungrouped_faces: i64,
 }

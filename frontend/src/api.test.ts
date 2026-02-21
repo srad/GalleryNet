@@ -36,9 +36,30 @@ const server = setupServer(
         return HttpResponse.json([
             { id: 'similar-2', filename: 'upload-similar.jpg', original_date: '2024-01-01', media_type: 'image', is_favorite: false, tags: [] }
         ]);
+    }),
+    http.get('http://localhost:3000/api/people', () => {
+        return HttpResponse.json([
+            [{ id: 'p1', name: 'John Doe', is_hidden: false, face_count: 1 }, { id: 'f1', box_x1: 0, box_y1: 0, box_x2: 10, box_y2: 10 }, { id: 'm1' }],
+            [{ id: 'p2', name: null, is_hidden: false, face_count: 1 }, { id: 'f2', box_x1: 0, box_y1: 0, box_x2: 10, box_y2: 10 }, { id: 'm2' }]
+        ]);
+    }),
+    http.put('http://localhost:3000/api/people/p1', async ({ request }) => {
+        const body = await request.json() as any;
+        if (body.name === 'Jane Doe') {
+            return new HttpResponse(null, { status: 200 });
+        }
+        return new HttpResponse(null, { status: 400 });
+    }),
+    http.post('http://localhost:3000/api/people/p1/merge', async ({ request }) => {
+        const body = await request.json() as any;
+        if (body.target_id === 'p2') {
+            return new HttpResponse(null, { status: 200 });
+        }
+        return new HttpResponse(null, { status: 400 });
     })
 
 );
+
 
 beforeEach(() => {
     vi.stubGlobal('location', {
@@ -94,4 +115,20 @@ describe('ApiClient', () => {
         expect(results).toHaveLength(1);
         expect(results[0].id).toBe('similar-2');
     });
+
+    it('fetches people list', async () => {
+        const people = await apiClient.getPeople();
+        expect(people).toHaveLength(2);
+        expect(people[0][0].name).toBe('John Doe');
+        expect(people[1][0].name).toBeNull();
+    });
+
+    it('updates a person', async () => {
+        await expect(apiClient.updatePerson('p1', { name: 'Jane Doe' })).resolves.not.toThrow();
+    });
+
+    it('merges people', async () => {
+        await expect(apiClient.mergePeople('p1', 'p2')).resolves.not.toThrow();
+    });
 });
+

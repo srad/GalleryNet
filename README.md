@@ -12,9 +12,10 @@
   <a href="https://teamcity.sedrad.com/viewType.html?buildTypeId=GalleryNet_Build&guest=1">
     <img src="https://teamcity.sedrad.com/app/rest/builds/buildType:(id:GalleryNet_Build)/statusIcon" alt="Build Status">
   </a>
-  <img src="https://img.shields.io/badge/tests-107-brightgreen?style=flat-square&logo=checkmarx&logoColor=white" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-108-brightgreen?style=flat-square&logo=checkmarx&logoColor=white" alt="Tests">
 
   <a href="https://hub.docker.com/r/sedrad/gallerynet/tags">
+
     <img src="https://img.shields.io/docker/image-size/sedrad/gallerynet/v1?style=flat-square&logo=docker&logoColor=white&label=docker%20image%20size" alt="Docker Size">
   </a>
 
@@ -223,7 +224,16 @@ src/
 | `POST`   | `/api/search`                     | Visual similarity search. Multipart with `file` + `similarity`                       |
 | `POST`   | `/api/media/group`                 | Group all media by visual similarity. Body: `{"similarity": 80}`                     |
 | `POST`   | `/api/media/faces/group`           | Group all media by detected faces. Body: `{"similarity": 60}`                        |
+| `POST`   | `/api/media/faces/search`          | Search for similar faces by face ID. Body: `{"face_id": "...", "similarity": 60}`    |
+| `GET`    | `/api/people`                      | List all identified people with representative faces                                 |
+| `GET`    | `/api/people/stats`                | Face and person statistics (total faces, unassigned, etc.)                           |
+| `GET`    | `/api/people/{id}`                 | Get person details                                                                   |
+| `PUT`    | `/api/people/{id}`                 | Update person (name, hidden, representative face)                                    |
+| `DELETE` | `/api/people/{id}`                 | Delete person profile                                                                |
+| `POST`   | `/api/people/{id}/merge`           | Merge person into another. Body: `{"target_id": "..."}`                              |
+| `GET`    | `/api/people/{id}/media`           | List all media containing this person                                                |
 | `GET`    | `/api/media`                      | Paginated media list. Params: `page`, `limit`, `media_type`, `sort`                  |
+
 | `GET`    | `/api/media/{id}`                 | Get single media item with EXIF data                                                 |
 | `POST`   | `/api/media/{id}/search-external` | Trigger server-side external image search (Yandex)                                   |
 | `POST`   | `/api/media/{id}/favorite`        | Toggle favorite status. Body: `{"favorite": true/false}`                             |

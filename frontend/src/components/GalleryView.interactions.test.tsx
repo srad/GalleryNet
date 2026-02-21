@@ -109,13 +109,14 @@ describe('GalleryView Interactions', () => {
 
         // 2. ArrowRight -> Focus '1'
         act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' })));
-        expect(screen.getByTestId('media-card-1').className).toContain('focused');
+        await waitFor(() => expect(screen.getByTestId('media-card-1').className).toContain('focused'));
 
         // 3. ArrowRight -> Focus '2'
         act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' })));
-        expect(screen.getByTestId('media-card-2').className).toContain('focused');
+        await waitFor(() => expect(screen.getByTestId('media-card-2').className).toContain('focused'));
 
         // 4. ArrowDown -> Focus '3' (from '2', '3' is visually below '1' but it's the next row)
+
         // With our layout logic: 
         // 1 (0,0)  2 (100,0)
         // 3 (0,100)
@@ -123,14 +124,15 @@ describe('GalleryView Interactions', () => {
         // Next row top is 100. '3' is at 100.
         // It should match.
         act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' })));
-        expect(screen.getByTestId('media-card-3').className).toContain('focused');
+        await waitFor(() => expect(screen.getByTestId('media-card-3').className).toContain('focused'));
 
         // 5. ArrowUp -> Focus '1' (visually above '3')
         act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp' })));
-        expect(screen.getByTestId('media-card-1').className).toContain('focused');
+        await waitFor(() => expect(screen.getByTestId('media-card-1').className).toContain('focused'));
     });
 
     it('triggers delete confirmation with Delete key', async () => {
+
         render(
             <MemoryRouter>
                 <GalleryView filter="all" onFilterChange={vi.fn()} refreshKey={0} folders={[]} onFoldersChanged={vi.fn()} />

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import type { MediaItem, Folder } from './types';
+import type { MediaItem, Folder, PersonWithFace } from './types';
 import { fireMediaUpdate } from './events';
 
 type WsMessage = {
@@ -50,14 +50,22 @@ type WsMessage = {
 } | {
     type: 'ThumbnailFixCompleted',
     data: { count: number }
+} | {
+    type: 'PersonUpdated',
+    data: { id: string, person: PersonWithFace }
+} | {
+    type: 'PeopleMerged',
+    data: { source_id: string, target_id: string }
 };
 
 export function useWebSocket(
     onFoldersChanged: () => void, 
     onUploadComplete: () => void, 
     onThumbnailFixStatusChange: (isFixing: boolean) => void,
+    onPeopleChanged: () => void,
     enabled: boolean = true
 ) {
+
     const socketRef = useRef<WebSocket | null>(null);
     const debounceTimeoutRef = useRef<number | null>(null);
 
@@ -134,7 +142,12 @@ export function useWebSocket(
                         case 'ThumbnailFixCompleted':
                             onThumbnailFixStatusChange(false);
                             break;
+                        case 'PersonUpdated':
+                        case 'PeopleMerged':
+                            onPeopleChanged();
+                            break;
                     }
+
                 } catch (err) {
                     console.error('Failed to parse WS message', err);
                 }

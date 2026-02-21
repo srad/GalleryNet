@@ -55,8 +55,31 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
     const [toastMessage, setToastMessage] = useState<string | null>(null);
     const [isSearching, setIsSearching] = useState(false);
     const [showFaces, setShowFaces] = useState(true);
+    const [personNames, setPersonNames] = useState<Record<string, string>>({});
 
     const navigate = useNavigate();
+
+    // Load person names for overlays
+    useEffect(() => {
+        apiClient.getPeople().then(people => {
+            const map: Record<string, string> = {};
+            people.forEach(([person]) => {
+                if (person.id && person.name) map[person.id] = person.name;
+            });
+            setPersonNames(map);
+        }).catch(console.error);
+    }, [item.id]);
+
+    const handleSetRepresentative = async (e: React.MouseEvent, personId: string, faceId: string) => {
+        e.stopPropagation();
+        try {
+            await apiClient.updatePerson(personId, { representative_face_id: faceId });
+            setToastMessage("Set as profile picture.");
+            setTimeout(() => setToastMessage(null), 3000);
+        } catch (e) {
+            console.error(e);
+        }
+    };
 
 
     const handleSearchImage = useCallback(async () => {
@@ -360,36 +383,48 @@ export default function MediaModal({ item, onClose, onPrev, onNext, onFindSimila
                                 {/* Faces Overlay - perfectly matches the img area because the parent div shrink-wraps the img */}
                                 {displayItem.faces && displayItem.faces.length > 0 && showFaces && (
                                     <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                                        {displayItem.faces.map(face => {
-                                            const imgWidth = displayItem.width || 1;
-                                            const imgHeight = displayItem.height || 1;
-                                            const left = (face.box_x1 / imgWidth) * 100;
-                                            const top = (face.box_y1 / imgHeight) * 100;
-                                            const width = ((face.box_x2 - face.box_x1) / imgWidth) * 100;
-                                            const height = ((face.box_y2 - face.box_y1) / imgHeight) * 100;
+                                            {displayItem.faces.map(face => {
+                                                const imgWidth = displayItem.width || 1;
+                                                const imgHeight = displayItem.height || 1;
+                                                const left = (face.box_x1 / imgWidth) * 100;
+                                                const top = (face.box_y1 / imgHeight) * 100;
+                                                const width = ((face.box_x2 - face.box_x1) / imgWidth) * 100;
+                                                const height = ((face.box_y2 - face.box_y1) / imgHeight) * 100;
+                                                const name = face.person_id ? (personNames[face.person_id] || `Unnamed Person ${face.cluster_id || ''}`) : 'Identifying...';
 
-                                            return (
-                                                <button
-                                                    key={face.id}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        navigate(`/search?face=${face.id}`);
-                                                    }}
-                                                    className="absolute border-2 border-white/40 hover:border-blue-400 hover:bg-blue-400/20 pointer-events-auto transition-all rounded-sm group/face shadow-[0_0_8px_rgba(0,0,0,0.5)]"
-                                                    style={{
-                                                        left: `${left}%`,
-                                                        top: `${top}%`,
-                                                        width: `${width}%`,
-                                                        height: `${height}%`,
-                                                    }}
-                                                    title="Find more of this person"
-                                                >
-                                                    <div className="absolute -top-6 left-0 bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover/face:opacity-100 transition-opacity whitespace-nowrap shadow-md">
-                                                        Search Person
+                                                return (
+                                                    <div
+                                                        key={face.id}
+                                                        className="absolute border-2 border-white/40 hover:border-blue-400 hover:bg-blue-400/10 pointer-events-auto transition-all rounded-sm group/face shadow-[0_0_8px_rgba(0,0,0,0.5)]"
+                                                        style={{
+                                                            left: `${left}%`,
+                                                            top: `${top}%`,
+                                                            width: `${width}%`,
+                                                            height: `${height}%`,
+                                                        }}
+                                                    >
+                                                        {/* Name Tag */}
+                                                        <div className="absolute -top-7 left-0 flex items-center gap-1 opacity-0 group-hover/face:opacity-100 transition-opacity whitespace-nowrap z-20">
+                                                            <button 
+                                                                onClick={(e) => { e.stopPropagation(); navigate(`/search?face=${face.id}`); }}
+                                                                className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded shadow-md font-bold hover:bg-blue-700"
+                                                            >
+                                                                {name}
+                                                            </button>
+                                                            {face.person_id && (
+                                                                <button
+                                                                    onClick={(e) => handleSetRepresentative(e, face.person_id!, face.id)}
+                                                                    className="bg-white/20 backdrop-blur-md text-white p-1 rounded shadow-md hover:bg-white/40"
+                                                                    title="Set as Profile Picture"
+                                                                >
+                                                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </button>
-                                            );
-                                        })}
+                                                );
+                                            })}
+
                                     </div>
                                 )}
                             </div>

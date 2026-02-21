@@ -151,9 +151,9 @@ mod tests {
             exif_json: None,
             phash: "hash".to_string(),
             is_favorite: false,
+            faces_scanned: false,
             tags: vec![],
             faces: vec![],
-            faces_scanned: true,
         };
 
         repo.save_metadata_and_vector(&item, None).unwrap();

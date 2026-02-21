@@ -115,9 +115,11 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
     const { folderId: routeFolderId } = useParams();
     const [searchParams, setSearchParams] = useSearchParams();
     const activeFolderId = folderId || routeFolderId;
+    const personId = searchParams.get('person');
     
     // Determine folder name if not provided
     const activeFolderName = folderName || folders.find(f => f.id === activeFolderId)?.name;
+
 
     const selectedMediaId = searchParams.get('media');
 
@@ -505,8 +507,10 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
                 media_type: currentFilter,
                 favorite: viewFavorites,
                 tags: filterTags,
+                person_id: personId || undefined,
                 folder_id: activeFolderId,
             });
+
             if (id !== fetchIdRef.current) return; // stale
 
             if (append) {
@@ -544,8 +548,10 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
                 media_type: currentFilter,
                 favorite: viewFavorites,
                 tags: filterTags,
+                person_id: personId || undefined,
                 folder_id: activeFolderId,
             });
+
             if (id !== fetchIdRef.current) return;
 
             setMedia(prev => {
@@ -623,7 +629,8 @@ const GalleryView = forwardRef<GalleryViewHandle, GalleryViewProps>(function Gal
         setInitialLoad(true);
         exitSelectionMode();
         fetchPage(1, filter, sortOrder, false, sortBy);
-    }, [filter, sortOrder, sortBy, fetchPage, exitSelectionMode, isGrouped, viewFavorites, filterTags]);
+    }, [filter, sortOrder, sortBy, fetchPage, exitSelectionMode, isGrouped, viewFavorites, filterTags, personId]);
+
 
     // --- Close sort menu on outside click ---
     useEffect(() => {

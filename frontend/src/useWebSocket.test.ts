@@ -27,14 +27,17 @@ describe('useWebSocket', () => {
     const onFoldersChanged = vi.fn();
     const onUploadComplete = vi.fn();
     const onThumbnailFixStatusChange = vi.fn();
+    const onPeopleChanged = vi.fn();
 
     beforeEach(() => {
         vi.useFakeTimers();
         onUploadComplete.mockClear();
         onFoldersChanged.mockClear();
         onThumbnailFixStatusChange.mockClear();
+        onPeopleChanged.mockClear();
         
         // Setup WebSocket mock
+
         // We use a regular function so it can be called with 'new'
         const WebSocketSpy = vi.fn(function(url: string) {
             mockWebSocket = new MockWebSocket(url);
@@ -58,12 +61,12 @@ describe('useWebSocket', () => {
     });
 
     it('connects to the correct URL', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, true));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, true));
         expect(WebSocket).toHaveBeenCalledWith('ws://localhost:3000/api/ws');
     });
 
     it('handles MediaCreated message', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, true));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, true));
         
         const mediaItem = { id: 'media-1', filename: 'test.jpg' };
         const event = {
@@ -80,7 +83,7 @@ describe('useWebSocket', () => {
     });
 
     it('handles MediaUpdated message', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, true));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, true));
         
         const mediaItem = { is_favorite: true };
         const event = {
@@ -96,7 +99,7 @@ describe('useWebSocket', () => {
     });
 
     it('handles MediaDeleted message', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, true));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, true));
         
         const event = {
             data: JSON.stringify({
@@ -112,7 +115,7 @@ describe('useWebSocket', () => {
     });
 
     it('handles UploadComplete message with debouncing', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, true));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, true));
         
         const event = {
             data: JSON.stringify({
@@ -133,7 +136,7 @@ describe('useWebSocket', () => {
     });
 
     it('handles ThumbnailFixStarted message', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, true));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, true));
 
         const event = {
             data: JSON.stringify({
@@ -148,7 +151,7 @@ describe('useWebSocket', () => {
     });
 
     it('handles ThumbnailFixCompleted message', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, true));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, true));
 
         const event = {
             data: JSON.stringify({
@@ -165,7 +168,7 @@ describe('useWebSocket', () => {
     });
 
     it('reconnects on close', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, true));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, true));
         
         expect(WebSocket).toHaveBeenCalledTimes(1);
 
@@ -178,7 +181,8 @@ describe('useWebSocket', () => {
     });
 
     it('does not connect when disabled', () => {
-        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, false));
+        renderHook(() => useWebSocket(onFoldersChanged, onUploadComplete, onThumbnailFixStatusChange, onPeopleChanged, false));
         expect(WebSocket).not.toHaveBeenCalled();
     });
+
 });

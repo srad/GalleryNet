@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
+
 
 interface ConfirmDialogProps {
     isOpen: boolean;
@@ -9,6 +10,7 @@ interface ConfirmDialogProps {
     isDestructive?: boolean;
     onConfirm: () => void;
     onCancel: () => void;
+    children?: React.ReactNode;
 }
 
 export default function ConfirmDialog({
@@ -19,8 +21,10 @@ export default function ConfirmDialog({
     cancelLabel = "Cancel",
     isDestructive = false,
     onConfirm,
-    onCancel
+    onCancel,
+    children
 }: ConfirmDialogProps) {
+
     const cancelRef = useRef<HTMLButtonElement>(null);
     const confirmRef = useRef<HTMLButtonElement>(null);
 
@@ -68,7 +72,9 @@ export default function ConfirmDialog({
                 <div className="p-6">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">{title}</h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">{message}</p>
+                    {children}
                 </div>
+
                 <div className="bg-gray-50 dark:bg-gray-900 px-6 py-4 flex items-center justify-end gap-3 border-t border-gray-100 dark:border-gray-700">
                     <button
                         ref={cancelRef}

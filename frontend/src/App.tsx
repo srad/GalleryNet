@@ -149,8 +149,12 @@ export default function App() {
         useCallback((fixing: boolean) => {
             setIsFixingThumbnails(fixing);
         }, []),
+        useCallback(() => {
+            setRefreshKey(k => k + 1);
+        }, []),
         authState === 'authenticated'
     );
+
 
     // Routing Logic
 

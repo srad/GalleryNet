@@ -1,5 +1,5 @@
 import { apiFetch } from './auth';
-import type { MediaItem, MediaGroup, MediaFilter, Stats, TagCount, Folder, PersonSummary } from './types';
+import type { MediaItem, MediaGroup, MediaFilter, Stats, TagCount, Folder, PersonWithFace, FaceStats } from './types';
 
 
 export interface DownloadPart {
@@ -164,6 +164,8 @@ export class ApiClient {
         media_type?: MediaFilter;
         favorite?: boolean;
         tags?: string[];
+        person_id?: string;
+        cluster_id?: number;
         folder_id?: string;
     }): Promise<MediaItem[]> {
         const query = new URLSearchParams({
@@ -175,6 +177,9 @@ export class ApiClient {
         if (params.media_type && params.media_type !== 'all') query.set('media_type', params.media_type);
         if (params.favorite) query.set('favorite', 'true');
         if (params.tags && params.tags.length > 0) query.set('tags', params.tags.join(','));
+        if (params.person_id) query.set('person_id', params.person_id);
+        if (params.cluster_id != null) query.set('cluster_id', String(params.cluster_id));
+
 
         const url = params.folder_id 
             ? this.getUrl(`/api/folders/${params.folder_id}/media?${query}`)
@@ -210,9 +215,15 @@ export class ApiClient {
         return res.json();
     }
 
-    async getPeople(): Promise<PersonSummary[]> {
-        const res = await apiFetch(this.getUrl('/api/media/faces/people'));
+    async getPeople(): Promise<PersonWithFace[]> {
+        const res = await apiFetch(this.getUrl('/api/people'));
         if (!res.ok) throw new Error('Failed to fetch people');
+        return res.json();
+    }
+
+    async getFaceStats(): Promise<FaceStats> {
+        const res = await apiFetch(this.getUrl('/api/people/stats'));
+        if (!res.ok) throw new Error('Failed to fetch face stats');
         return res.json();
     }
 
@@ -224,6 +235,24 @@ export class ApiClient {
         });
         if (!res.ok) throw new Error('Face search failed');
         return res.json();
+    }
+
+    async updatePerson(id: string, params: { name?: string; is_hidden?: boolean; representative_face_id?: string }): Promise<void> {
+        const res = await apiFetch(this.getUrl(`/api/people/${id}`), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
+        });
+        if (!res.ok) throw new Error('Failed to update person');
+    }
+
+    async mergePeople(sourceId: string, targetId: string): Promise<void> {
+        const res = await apiFetch(this.getUrl(`/api/people/${sourceId}/merge`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_id: targetId }),
+        });
+        if (!res.ok) throw new Error('Merge failed');
     }
 
     async toggleFavorite(id: string, favorite: boolean): Promise<void> {
